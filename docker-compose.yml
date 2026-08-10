@@ -1,0 +1,61 @@
+services:
+  # backend + frontend corren en Docker.
+  # Ollama corre NATIVO en el host (Apple Silicon/GPU): Docker en Mac no expone
+  # la GPU/Metal, así que los contenedores hablan con el Ollama del host vía
+  # host.docker.internal. (Para correr Ollama TAMBIÉN en Docker, ver el bloque
+  # comentado al final — en Mac sería solo CPU y más lento.)
+
+  backend:
+    build: ./backend
+    container_name: guard_assistant_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434 # Ollama nativo en el host
+      - LLM_MODEL=qwen2.5:7b-instruct
+      - EMBED_MODEL=bge-m3
+      - CHROMA_DIR=/app/chroma_db
+    volumes:
+      - ./backend:/app
+      - ./data:/app/chroma_db # el vector store persiste entre reinicios
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # necesario en Linux; inofensivo en Mac/Windows
+
+  frontend:
+    build: ./frontend
+    container_name: guard_assistant_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true # file watching dentro del contenedor
+      - BACKEND_URL=http://backend:8000 # /api se proxya al servicio backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # evita que el node_modules local pise el del contenedor
+    depends_on:
+      - backend
+
+volumes:
+  data:
+
+# --- OPCIONAL: correr Ollama también en Docker (CPU en Mac; GPU NVIDIA en Linux) ---
+# Descomenta este servicio, cambia OLLAMA_HOST del backend a http://ollama:11434
+# y añade `depends_on: [ollama]` al backend.
+#
+#  ollama:
+#    image: ollama/ollama:latest
+#    container_name: guard_ollama
+#    ports:
+#      - "11434:11434"
+#    volumes:
+#      - ollama_models:/root/.ollama
+#    # deploy:                     # solo Linux + NVIDIA
+#    #   resources:
+#    #     reservations:
+#    #       devices:
+#    #         - driver: nvidia
+#    #           count: all
+#    #           capabilities: [gpu]
+#
+# volumes:
+#   ollama_models:

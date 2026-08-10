@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Secrets / entorno
+.env
+
+# Vector store persistido (se regenera con: python -m app.ingest)
+chroma_db/
+
+# Node (backend Node antiguo, ya obsoleto)
+node_modules/
+dist/
+
+.claude/

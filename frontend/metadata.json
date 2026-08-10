@@ -1,0 +1,6 @@
+{
+  "name": "Tótem de Seguridad Residencial",
+  "description": "Aplicación de tótem de seguridad residencial con asistente virtual 3D interactivo en Three.js e integración de Gemini API para verificar accesos.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

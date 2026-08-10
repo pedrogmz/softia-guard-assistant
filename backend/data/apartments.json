@@ -1,0 +1,10 @@
+[
+  { "apt": "1A", "owner": "María Mendoza", "status": "Disponible", "notes": "Llamar para verificar siempre." },
+  { "apt": "1B", "owner": "Carlos Rodríguez", "status": "No Molestar", "notes": "No recibe visitas no programadas." },
+  { "apt": "2A", "owner": "Alejandro Gómez", "status": "Disponible", "notes": "Espera un delivery de comida o paquete. Autorizar si es repartidor." },
+  { "apt": "2B", "owner": "Valentina Silva", "status": "Disponible", "notes": "Tiene invitados autorizados hoy." },
+  { "apt": "3A", "owner": "Francisco Tocuyo", "status": "Fuera de la Ciudad", "notes": "No se permite el acceso a nadie. Casa vacía." },
+  { "apt": "3B", "owner": "Diana Carolina", "status": "Disponible", "notes": "Permite acceso directo a familiares." },
+  { "apt": "4A", "owner": "Roberto Pérez", "status": "Disponible", "notes": "Llamar primero al intercomunicador." },
+  { "apt": "4B", "owner": "Elena Rivas", "status": "Esperando Visita", "notes": "Invitado con Código QR pre-aprobado para hoy." }
+]
