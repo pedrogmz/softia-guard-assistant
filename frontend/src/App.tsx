@@ -37,6 +37,8 @@ export default function App() {
     },
   ]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  // Transcribiendo el audio de voz en el backend (feedback tras hablar)
+  const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   const [animationState, setAnimationState] = useState<"idle" | "talking" | "scanning" | "success" | "denied">("idle");
 
   // Audio Feedback (Text-to-Speech & Speech-to-Text)
@@ -61,10 +63,10 @@ export default function App() {
   // Auto-stop de seguridad para no dejar el micrófono grabando indefinidamente
   const recordTimeoutRef = useRef<any>(null);
 
-  // Scroll to bottom of chat
+  // Scroll to bottom of chat (también al mostrar el indicador de procesamiento)
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory]);
+  }, [chatHistory, isTranscribing, isProcessing]);
 
   // Gate automatic closing countdown
   useEffect(() => {
@@ -129,8 +131,9 @@ export default function App() {
       setAnimationState("idle");
       return;
     }
+    setIsTranscribing(true);
+    setAnimationState("scanning");
     try {
-      setAnimationState("scanning");
       const formData = new FormData();
       formData.append("file", blob, "audio.webm");
       const res = await fetch("/api/transcribe", { method: "POST", body: formData });
@@ -139,13 +142,23 @@ export default function App() {
       const text = (data.text || "").trim();
       if (text) {
         setVisitorMessage(text);
-        handleSendRequest(text);
-      } else {
-        setAnimationState("idle");
+        setIsTranscribing(false);
+        handleSendRequest(text); // toma el relevo del feedback con isProcessing
+        return;
       }
+      // No se entendió el audio: dar feedback explícito (visual + hablado)
+      const noHear = "Disculpe, no le entendí bien. ¿Podría repetirlo, por favor?";
+      setChatHistory((prev) => [...prev, { role: "assistant", text: noHear }]);
+      setAnimationState("idle");
+      speakText(noHear);
     } catch (e) {
       console.error("Transcription failed:", e);
+      const errMsg = "Disculpe, tuve un problema al escucharle. Por favor, intente de nuevo.";
+      setChatHistory((prev) => [...prev, { role: "assistant", text: errMsg }]);
       setAnimationState("idle");
+      speakText(errMsg);
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
@@ -440,9 +453,20 @@ export default function App() {
               {/* Float dialog at the bottom center of Avatar Screen */}
               <div className="absolute bottom-6 left-6 right-6 bg-black/60 border border-white/10 rounded-2xl p-4 backdrop-blur-md z-10 max-w-xl mx-auto shadow-2xl">
                 <p className="text-emerald-400 text-[10px] font-mono tracking-widest uppercase mb-1.5">Asistente Virtual</p>
-                <p className="text-sm sm:text-base leading-relaxed text-slate-100 font-sans font-medium">
-                  "{chatHistory[chatHistory.length - 1]?.text}"
-                </p>
+                {isTranscribing || isProcessing ? (
+                  <p className="text-sm sm:text-base leading-relaxed text-emerald-300/90 font-sans font-medium flex items-center gap-2">
+                    <span className="flex gap-1">
+                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0s" }} />
+                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }} />
+                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }} />
+                    </span>
+                    {isTranscribing ? "Entendiendo su mensaje…" : "Verificando su solicitud…"}
+                  </p>
+                ) : (
+                  <p className="text-sm sm:text-base leading-relaxed text-slate-100 font-sans font-medium">
+                    "{chatHistory[chatHistory.length - 1]?.text}"
+                  </p>
+                )}
               </div>
             </div>
 
@@ -468,7 +492,9 @@ export default function App() {
                       <div className="w-1 h-2 bg-white/10 rounded-full"></div>
                       <div className="w-1 h-2 bg-white/10 rounded-full"></div>
                       <div className="w-1 h-2 bg-white/10 rounded-full"></div>
-                      <span className="ml-2 text-white/40 italic text-xs">Presione el micrófono para hablar</span>
+                      <span className="ml-2 text-white/40 italic text-xs">
+                        {isTranscribing ? "Procesando su voz…" : isProcessing ? "Verificando…" : "Presione el micrófono para hablar"}
+                      </span>
                     </>
                   )}
                 </div>
@@ -488,7 +514,8 @@ export default function App() {
                 {/* Microphone trigger button */}
                 <button
                   onClick={toggleListening}
-                  className={`p-3.5 rounded-full transition-all cursor-pointer shadow-md ${isListening
+                  disabled={!isListening && (isProcessing || isTranscribing)}
+                  className={`p-3.5 rounded-full transition-all cursor-pointer shadow-md disabled:opacity-40 disabled:cursor-not-allowed ${isListening
                       ? "bg-rose-600 hover:bg-rose-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)]"
                       : "bg-white/5 hover:bg-white/10 border border-white/10 text-white/90"
                     }`}
@@ -699,6 +726,23 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+                {(isTranscribing || isProcessing) && (
+                  <div className="flex flex-col items-start">
+                    <span className="text-[9px] font-mono text-white/30 mb-1 uppercase tracking-wider">
+                      Asistente Virtual
+                    </span>
+                    <div className="p-3 rounded-2xl rounded-tl-none bg-[#151515] border border-white/5 text-white/70 flex items-center gap-2">
+                      <span className="flex gap-1">
+                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0s" }} />
+                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }} />
+                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }} />
+                      </span>
+                      <span className="text-[11px] font-mono">
+                        {isTranscribing ? "Entendiendo su mensaje…" : "Verificando acceso…"}
+                      </span>
+                    </div>
+                  </div>
+                )}
                 <div ref={chatEndRef} />
               </div>
 
