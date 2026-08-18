@@ -56,6 +56,10 @@ export default function App() {
   // Speech Recognition API reference
   const recognitionRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  // Timeout de seguridad para liberar el micrófono si no llega resultado
+  const listenTimeoutRef = useRef<any>(null);
+  // Referencia siempre-actual a handleSendRequest (evita recrear el reconocedor)
+  const handleSendRequestRef = useRef<(msg: string) => void>(() => {});
 
   // Scroll to bottom of chat
   useEffect(() => {
@@ -106,48 +110,81 @@ export default function App() {
     }
   };
 
-  // Initialize Speech Recognition
+  // Mantener siempre-actual la referencia al handler (sin recrear el reconocedor)
+  useEffect(() => {
+    handleSendRequestRef.current = handleSendRequest;
+  });
+
+  // Initialize Speech Recognition (UNA sola vez: evita fugas que dejan el
+  // micrófono tomado de forma indefinida)
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.lang = "es-ES";
+    if (!SpeechRecognition) return;
 
-      rec.onstart = () => {
-        setIsListening(true);
-        setAnimationState("scanning");
-      };
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = "es-ES";
 
-      rec.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setVisitorMessage(transcript);
-        handleSendRequest(transcript);
-      };
+    const clearListenTimeout = () => {
+      if (listenTimeoutRef.current) {
+        clearTimeout(listenTimeoutRef.current);
+        listenTimeoutRef.current = null;
+      }
+    };
 
-      rec.onerror = (event: any) => {
-        console.error("Speech recognition error:", event.error);
-        setIsListening(false);
-        setAnimationState("idle");
-      };
+    rec.onstart = () => {
+      setIsListening(true);
+      setAnimationState("scanning");
+      // Red de seguridad: si no llega resultado, soltar el micrófono a los 8s
+      clearListenTimeout();
+      listenTimeoutRef.current = setTimeout(() => {
+        try { rec.stop(); } catch { /* noop */ }
+      }, 8000);
+    };
 
-      rec.onend = () => {
-        setIsListening(false);
-      };
+    rec.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setVisitorMessage(transcript);
+      handleSendRequestRef.current(transcript);
+    };
 
-      recognitionRef.current = rec;
-    }
-  }, [chatHistory]);
+    rec.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      clearListenTimeout();
+      setIsListening(false);
+      setAnimationState("idle");
+    };
+
+    rec.onend = () => {
+      // Garantiza que el micrófono quede liberado tras cada uso
+      clearListenTimeout();
+      setIsListening(false);
+    };
+
+    recognitionRef.current = rec;
+
+    // Liberar el micrófono al desmontar el componente
+    return () => {
+      clearListenTimeout();
+      try { rec.abort(); } catch { /* noop */ }
+      recognitionRef.current = null;
+    };
+  }, []);
 
   const toggleListening = () => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
     if (isListening) {
-      recognitionRef.current?.stop();
+      // abort() corta y libera el micrófono de inmediato (mejor que stop() al cancelar)
+      try { rec.abort(); } catch { /* noop */ }
+      setIsListening(false);
+      setAnimationState("idle");
     } else {
       try {
-        recognitionRef.current?.start();
+        rec.start();
       } catch (e) {
         console.error("Failed to start speech recognition:", e);
       }
