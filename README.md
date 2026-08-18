@@ -19,8 +19,9 @@ Navegador (voz + UI 3D)                Docker                         Host
                                 └──────────────────────┘      └──────────────────────┘
 ```
 
-- **Voz**: la síntesis (TTS) y el reconocimiento (STT) ocurren **en el navegador** (Web Speech
-  API). El backend solo intercambia texto.
+- **Voz de salida (TTS)**: la síntesis ocurre **en el navegador** (Web Speech API).
+- **Voz de entrada (STT)**: el navegador graba un clip y lo envía a `/api/transcribe`, donde
+  **Whisper local** (faster-whisper) lo transcribe. El audio **no sale a ningún servicio externo**.
 - **LLM local**: [Ollama](https://ollama.com) con `qwen2.5:7b-instruct` (respuesta en JSON estructurado).
 - **RAG local**: ChromaDB (embebido) + embeddings `bge-m3` sobre la base de conocimiento
   (apartamentos + políticas del edificio).
@@ -123,6 +124,7 @@ Variables principales (definidas en `docker-compose.yml`, ajustables):
 | `OLLAMA_HOST` | backend | `http://host.docker.internal:11434` | Dónde corre Ollama |
 | `LLM_MODEL` | backend | `qwen2.5:7b-instruct` | Modelo de lenguaje |
 | `EMBED_MODEL` | backend | `bge-m3` | Modelo de embeddings |
+| `WHISPER_MODEL` | backend | `small` | Modelo de STT (Whisper) |
 | `BACKEND_URL` | frontend | `http://backend:8000` | Destino del proxy `/api` |
 
 Para correr **Ollama también en Docker** (CPU en Mac, GPU NVIDIA en Linux), descomenta el
@@ -139,6 +141,10 @@ servicio `ollama` al final de `docker-compose.yml` y cambia `OLLAMA_HOST` a `htt
   los modelos estén descargados (`ollama list`).
 - **La voz no suena**: la síntesis depende de las voces del navegador/SO instaladas para
   español; en Chrome/Edge suele funcionar sin configuración.
+- **El micrófono no funciona / `getUserMedia` falla**: requiere **contexto seguro**. Funciona en
+  `http://localhost:3000`, pero si accedes al tótem por IP o dominio necesitas **HTTPS**.
+- **La primera transcripción tarda**: Whisper descarga el modelo (`small`, ~0.5 GB) la primera
+  vez y lo cachea en el volumen `whisper_cache`; las siguientes son rápidas.
 
 ## Seguridad
 

@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import config, llm, prompt, rag
+from . import config, llm, prompt, rag, stt
 from .schemas import Action, Animation, Status, VerifyRequest, VerifyResponse
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +48,19 @@ def health() -> dict:
 def list_apartments() -> list:
     """Paridad con el backend original (server.ts:127). El frontend actual no lo usa."""
     return rag.load_apartments()
+
+
+@app.post("/api/transcribe")
+async def transcribe(file: UploadFile = File(...)) -> dict:
+    """STT local: recibe un clip de audio del navegador y devuelve el texto.
+    100% local (Whisper), sin enviar el audio a ningún servicio externo."""
+    try:
+        audio_bytes = await file.read()
+        text = stt.transcribe(audio_bytes)
+        return {"text": text}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en /api/transcribe: %s", exc)
+        return {"text": "", "error": "transcription_failed"}
 
 
 @app.post("/api/verify", response_model=VerifyResponse)

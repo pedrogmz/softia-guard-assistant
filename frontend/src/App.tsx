@@ -53,13 +53,13 @@ export default function App() {
   const [identifiedOwner, setIdentifiedOwner] = useState<string | null>(null);
   const [identifiedApt, setIdentifiedApt] = useState<string | null>(null);
 
-  // Speech Recognition API reference
-  const recognitionRef = useRef<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  // Timeout de seguridad para liberar el micrófono si no llega resultado
-  const listenTimeoutRef = useRef<any>(null);
-  // Referencia siempre-actual a handleSendRequest (evita recrear el reconocedor)
-  const handleSendRequestRef = useRef<(msg: string) => void>(() => {});
+  // STT local: grabación de audio con MediaRecorder (Whisper corre en el backend)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  // Auto-stop de seguridad para no dejar el micrófono grabando indefinidamente
+  const recordTimeoutRef = useRef<any>(null);
 
   // Scroll to bottom of chat
   useEffect(() => {
@@ -110,86 +110,112 @@ export default function App() {
     }
   };
 
-  // Mantener siempre-actual la referencia al handler (sin recrear el reconocedor)
-  useEffect(() => {
-    handleSendRequestRef.current = handleSendRequest;
-  });
+  // Libera el micrófono del sistema deteniendo todas las pistas de audio.
+  const releaseMicrophone = () => {
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+  };
 
-  // Initialize Speech Recognition (UNA sola vez: evita fugas que dejan el
-  // micrófono tomado de forma indefinida)
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) return;
-
-    const rec = new SpeechRecognition();
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.lang = "es-ES";
-
-    const clearListenTimeout = () => {
-      if (listenTimeoutRef.current) {
-        clearTimeout(listenTimeoutRef.current);
-        listenTimeoutRef.current = null;
-      }
-    };
-
-    rec.onstart = () => {
-      setIsListening(true);
-      setAnimationState("scanning");
-      // Red de seguridad: si no llega resultado, soltar el micrófono a los 8s
-      clearListenTimeout();
-      listenTimeoutRef.current = setTimeout(() => {
-        try { rec.stop(); } catch { /* noop */ }
-      }, 8000);
-    };
-
-    rec.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setVisitorMessage(transcript);
-      handleSendRequestRef.current(transcript);
-    };
-
-    rec.onerror = (event: any) => {
-      console.error("Speech recognition error:", event.error);
-      clearListenTimeout();
-      setIsListening(false);
-      setAnimationState("idle");
-    };
-
-    rec.onend = () => {
-      // Garantiza que el micrófono quede liberado tras cada uso
-      clearListenTimeout();
-      setIsListening(false);
-    };
-
-    recognitionRef.current = rec;
-
-    // Liberar el micrófono al desmontar el componente
-    return () => {
-      clearListenTimeout();
-      try { rec.abort(); } catch { /* noop */ }
-      recognitionRef.current = null;
-    };
-  }, []);
-
-  const toggleListening = () => {
-    const rec = recognitionRef.current;
-    if (!rec) return;
-    if (isListening) {
-      // abort() corta y libera el micrófono de inmediato (mejor que stop() al cancelar)
-      try { rec.abort(); } catch { /* noop */ }
-      setIsListening(false);
-      setAnimationState("idle");
-    } else {
-      try {
-        rec.start();
-      } catch (e) {
-        console.error("Failed to start speech recognition:", e);
-      }
+  const clearRecordTimeout = () => {
+    if (recordTimeoutRef.current) {
+      clearTimeout(recordTimeoutRef.current);
+      recordTimeoutRef.current = null;
     }
   };
+
+  // Envía el clip grabado al backend (Whisper local) y usa la transcripción.
+  const transcribeAndSend = async (blob: Blob) => {
+    if (blob.size === 0) {
+      setAnimationState("idle");
+      return;
+    }
+    try {
+      setAnimationState("scanning");
+      const formData = new FormData();
+      formData.append("file", blob, "audio.webm");
+      const res = await fetch("/api/transcribe", { method: "POST", body: formData });
+      if (!res.ok) throw new Error(`STT HTTP ${res.status}`);
+      const data = await res.json();
+      const text = (data.text || "").trim();
+      if (text) {
+        setVisitorMessage(text);
+        handleSendRequest(text);
+      } else {
+        setAnimationState("idle");
+      }
+    } catch (e) {
+      console.error("Transcription failed:", e);
+      setAnimationState("idle");
+    }
+  };
+
+  const startListening = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      console.error("getUserMedia no disponible (¿contexto seguro? usa localhost o HTTPS)");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        clearRecordTimeout();
+        releaseMicrophone(); // suelta el micrófono en cuanto termina la grabación
+        setIsListening(false);
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        audioChunksRef.current = [];
+        transcribeAndSend(blob);
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsListening(true);
+      setAnimationState("scanning");
+
+      // Red de seguridad: corta la grabación a los 10s
+      clearRecordTimeout();
+      recordTimeoutRef.current = setTimeout(() => stopListening(), 10000);
+    } catch (e) {
+      console.error("No se pudo acceder al micrófono:", e);
+      releaseMicrophone();
+      setIsListening(false);
+      setAnimationState("idle");
+    }
+  };
+
+  const stopListening = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop(); // dispara onstop -> libera micrófono + transcribe
+    } else {
+      clearRecordTimeout();
+      releaseMicrophone();
+      setIsListening(false);
+    }
+  };
+
+  const toggleListening = () => {
+    if (isListening) stopListening();
+    else startListening();
+  };
+
+  // Liberar el micrófono si el componente se desmonta mientras graba
+  useEffect(() => {
+    return () => {
+      clearRecordTimeout();
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      } catch { /* noop */ }
+      releaseMicrophone();
+    };
+  }, []);
 
   // Dial Pad clicks
   const handleKeypadPress = (val: string) => {

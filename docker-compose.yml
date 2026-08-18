@@ -15,9 +15,16 @@ services:
       - LLM_MODEL=qwen2.5:7b-instruct
       - EMBED_MODEL=bge-m3
       - CHROMA_DIR=/app/chroma_db
+      # STT local (Whisper). El modelo se descarga una vez y se cachea en el volumen.
+      - WHISPER_MODEL=small
+      - WHISPER_DEVICE=cpu
+      - WHISPER_COMPUTE_TYPE=int8
+      - WHISPER_LANGUAGE=es
+      - HF_HOME=/app/.hf_cache
     volumes:
       - ./backend:/app
       - ./data:/app/chroma_db # el vector store persiste entre reinicios
+      - ./whisper_cache:/app/.hf_cache # cache del modelo Whisper (evita re-descargas)
     extra_hosts:
       - "host.docker.internal:host-gateway" # necesario en Linux; inofensivo en Mac/Windows
 
@@ -37,25 +44,4 @@ services:
 
 volumes:
   data:
-
-# --- OPCIONAL: correr Ollama también en Docker (CPU en Mac; GPU NVIDIA en Linux) ---
-# Descomenta este servicio, cambia OLLAMA_HOST del backend a http://ollama:11434
-# y añade `depends_on: [ollama]` al backend.
-#
-#  ollama:
-#    image: ollama/ollama:latest
-#    container_name: guard_ollama
-#    ports:
-#      - "11434:11434"
-#    volumes:
-#      - ollama_models:/root/.ollama
-#    # deploy:                     # solo Linux + NVIDIA
-#    #   resources:
-#    #     reservations:
-#    #       devices:
-#    #         - driver: nvidia
-#    #           count: all
-#    #           capabilities: [gpu]
-#
-# volumes:
-#   ollama_models:
+  whisper_cache:

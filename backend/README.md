@@ -2,18 +2,27 @@
 
 Backend de control de acceso para el tótem de **Residencias El Ávila**. Reemplaza la
 dependencia de Google Gemini por un **modelo de IA local (Ollama)** con **RAG (ChromaDB)**.
-No usa ningún servicio en la nube. La voz (TTS/STT) la maneja el navegador (Web Speech API),
-así que este backend solo intercambia texto: recibe la petición del visitante y devuelve un
-JSON estructurado con la respuesta hablada y la acción del tótem.
+No usa ningún servicio en la nube. La **voz de salida (TTS)** la maneja el navegador; la **voz
+de entrada (STT)** se transcribe aquí con **Whisper local**, así que el audio no sale a Internet.
+
+## Endpoints
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/api/verify` | Verificación de acceso (texto → JSON estructurado con LLM + RAG) |
+| POST | `/api/transcribe` | STT: recibe un clip de audio y devuelve `{ text }` (Whisper local) |
+| GET | `/api/apartments` | Lista los apartamentos (paridad; el frontend no lo usa) |
+| GET | `/health` | Estado y modelos configurados |
 
 ## Arquitectura
 
 ```
-Navegador (voz + UI)  ──POST /api/verify──▶  FastAPI (este backend)
-                                               │  1. lookup del apartamento (data/apartments.json)
-                                               │  2. RAG: recupera políticas (ChromaDB + bge-m3)
-                                               │  3. LLM: Ollama (qwen2.5:7b) con salida JSON
-                                               ▼
+Navegador (voz + UI)  ──POST /api/verify─────▶  FastAPI (este backend)
+                      ──POST /api/transcribe─▶     │  verify: 1. lookup apartamento (apartments.json)
+                                                   │          2. RAG políticas (ChromaDB + bge-m3)
+                                                   │          3. LLM Ollama (qwen2.5:7b) → JSON
+                                                   │  transcribe: Whisper local (faster-whisper)
+                                                   ▼
                                          Ollama (LLM + embeddings, local)
 ```
 
@@ -47,6 +56,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 Vuelve a ejecutar `python -m app.ingest` cada vez que edites `data/apartments.json` o los
 documentos de `knowledge/`.
+
+> **STT (Whisper):** el modelo (`WHISPER_MODEL`, por defecto `small`) se **descarga
+> automáticamente la primera vez** que se llama a `/api/transcribe` y queda cacheado. En
+> Apple Silicon corre en CPU (CTranslate2 no usa Metal), suficiente para clips cortos; en
+> Linux con GPU NVIDIA pon `WHISPER_DEVICE=cuda` y `WHISPER_COMPUTE_TYPE=float16`.
 
 ## Probar
 

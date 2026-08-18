@@ -8,37 +8,51 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Backend local (FastAPI + Ollama + RAG). Sin dependencias de nube.
+// Backend local (FastAPI + Ollama + RAG + Whisper). Sin dependencias de nube.
 // Usamos 127.0.0.1 (no "localhost") a propósito: el fetch de Node resuelve
 // "localhost" a IPv6 (::1) y uvicorn escucha solo en IPv4 -> "fetch failed".
 const BACKEND_URL = process.env.BACKEND_URL || "http://127.0.0.1:8000";
 
-app.use(express.json());
-
-// Proxy: todo /api/* se reenvía al backend Python local, manteniendo el
-// mismo origen para el navegador. El backend resuelve con LLM local + RAG.
+// Proxy en streaming: reenvía /api/* al backend tal cual, sin parsear el cuerpo.
+// Así funciona igual para JSON (/api/verify) que para audio binario
+// multipart (/api/transcribe). NO usamos express.json() para no consumir el stream.
 app.use("/api", async (req, res) => {
   const target = `${BACKEND_URL}/api${req.url}`;
+  const hasBody = req.method !== "GET" && req.method !== "HEAD";
   try {
+    const headers: Record<string, string> = {};
+    if (req.headers["content-type"]) headers["content-type"] = req.headers["content-type"] as string;
+
     const upstream = await fetch(target, {
       method: req.method,
-      headers: { "Content-Type": "application/json" },
-      body: req.method === "GET" || req.method === "HEAD" ? undefined : JSON.stringify(req.body),
-    });
-    const data = await upstream.json();
-    res.status(upstream.status).json(data);
+      headers,
+      body: hasBody ? (req as any) : undefined,
+      // Requerido por undici para enviar un stream de request en Node.
+      ...(hasBody ? { duplex: "half" } : {}),
+    } as any);
+
+    res.status(upstream.status);
+    const contentType = upstream.headers.get("content-type");
+    if (contentType) res.set("content-type", contentType);
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.send(buffer);
   } catch (error: any) {
     console.error("Backend proxy error:", error?.message || error);
-    // Contingencia con el mismo shape que consume el frontend (App.tsx).
-    res.status(502).json({
-      reply:
-        "Disculpe las molestias, no puedo contactar con el sistema de seguridad en este momento. Por favor, intente de nuevo o presione el Botón de Pánico.",
-      status: "ERROR",
-      apartment: null,
-      owner: null,
-      action: "show_error",
-      assistant_animation: "denied",
-    });
+    // Para /api/verify devolvemos el shape que consume App.tsx; para el resto,
+    // un error genérico.
+    if (req.url.startsWith("/verify")) {
+      res.status(502).json({
+        reply:
+          "Disculpe las molestias, no puedo contactar con el sistema de seguridad en este momento. Por favor, intente de nuevo o presione el Botón de Pánico.",
+        status: "ERROR",
+        apartment: null,
+        owner: null,
+        action: "show_error",
+        assistant_animation: "denied",
+      });
+    } else {
+      res.status(502).json({ error: "backend_unavailable" });
+    }
   }
 });
 

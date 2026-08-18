@@ -13,8 +13,10 @@ navegador** con la Web Speech API. Toda la lógica de IA vive en el backend loca
 - **React 19** + **Vite 6** + **TypeScript**
 - **Three.js** — avatar holográfico (`src/components/VirtualAssistantCanvas.tsx`)
 - **Tailwind CSS v4**, **lucide-react** (iconos), **motion** (animaciones)
-- **Express** (`server.ts`) — sirve la SPA y **proxya `/api` al backend**
-- **Web Speech API** — `speechSynthesis` (TTS) y `SpeechRecognition` (STT), sin dependencias
+- **Express** (`server.ts`) — sirve la SPA y **proxya `/api` al backend** (en streaming, soporta audio)
+- **`speechSynthesis`** (Web Speech API) — voz de salida (TTS), en el navegador
+- **`MediaRecorder` + `getUserMedia`** — graba el audio del micrófono y lo envía a
+  `/api/transcribe`; el reconocimiento (STT) ocurre en el backend con **Whisper local**
 
 ## Cómo se comunica con el backend
 
@@ -84,7 +86,11 @@ frontend/
 
 ## Notas sobre la voz
 
-- La respuesta hablada usa las **voces del navegador/SO** instaladas para español (`es-VE`/`es-ES`).
+- **Salida (TTS)**: usa las **voces del navegador/SO** instaladas para español (`es-VE`/`es-ES`).
   Chrome y Edge suelen tenerlas sin configuración; en otros navegadores puede variar la calidad.
-- El reconocimiento de voz (`SpeechRecognition`) tiene mejor soporte en navegadores basados en
-  Chromium. Hay un botón de micrófono y un toggle para silenciar la voz del asistente.
+- **Entrada (STT)**: al pulsar el micrófono se graba un clip con `MediaRecorder` y se envía a
+  `/api/transcribe`, donde **Whisper local** (faster-whisper) lo transcribe. El audio **no sale a
+  ningún servicio externo**. El micrófono se **libera en cuanto se detiene la grabación**
+  (`getTracks().forEach(t => t.stop())`), con auto-stop de seguridad a los 10 s.
+- `getUserMedia` requiere **contexto seguro**: funciona en `http://localhost:3000`, pero en un
+  tótem accedido por IP/dominio necesitarás **HTTPS**.
