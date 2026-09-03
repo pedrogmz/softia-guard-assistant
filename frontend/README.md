@@ -94,3 +94,38 @@ frontend/
   (`getTracks().forEach(t => t.stop())`), con auto-stop de seguridad a los 10 s.
 - `getUserMedia` requiere **contexto seguro**: funciona en `http://localhost:3000`, pero en un
   tótem accedido por IP/dominio necesitarás **HTTPS**.
+
+## Ciclo de estados de la interacción por voz
+
+Al hablar, la UI atraviesa varias fases con feedback visual y hablado en cada una (evita la
+sensación de "no se entendió nada" durante el procesamiento):
+
+```mermaid
+stateDiagram-v2
+    [*] --> EnEspera
+    EnEspera --> Grabando: toca micrófono
+    EnEspera --> Verificando: texto escrito (sin voz)
+    Grabando --> Transcribiendo: detener / 10 s (libera micrófono)
+    Transcribiendo --> Verificando: texto reconocido
+    Transcribiendo --> Respondiendo: audio no entendido
+    Verificando --> Respondiendo: respuesta del backend / error
+    Respondiendo --> EnEspera: fin de TTS
+
+    note right of Grabando: Navegador — MediaRecorder + getUserMedia
+    note right of Transcribiendo: Backend — Whisper (faster-whisper)
+    note right of Verificando: Backend — Ollama LLM + RAG (Chroma)
+    note right of Respondiendo: Navegador — speechSynthesis + acción del tótem
+```
+
+Feedback por fase (en `src/App.tsx`):
+
+| Estado | Señal en la UI |
+|---|---|
+| **Grabando** (`isListening`) | barra de ondas animada + "Escuchando… Hable ahora" |
+| **Transcribiendo** (`isTranscribing`) | puntos animados + "Entendiendo su mensaje…" |
+| **Verificando** (`isProcessing`) | puntos animados + "Verificando su solicitud…" |
+| **Respondiendo** | respuesta hablada (TTS) y acción del tótem (portón, QR, intercomunicador) |
+
+Rutas alternas: si escribes en vez de hablar, se salta directo a **Verificando**; si Whisper no
+entiende el audio o hay un error de red, el asistente responde con un mensaje de disculpa (texto
+y voz) y vuelve a **En espera**.

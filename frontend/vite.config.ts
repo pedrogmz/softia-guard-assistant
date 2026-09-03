@@ -6,6 +6,8 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // Trata los modelos 3D .fbx como assets (import ?url devuelve su URL servida)
+    assetsInclude: ['**/*.fbx'],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
