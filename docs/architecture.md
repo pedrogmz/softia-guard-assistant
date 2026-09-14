@@ -42,6 +42,24 @@ Navegador (tótem)                    Docker                          Host / Red
 5. **Refuerzo** — si se resolvió el apartamento, se completan `apartment`/`owner` con el dato
    autoritativo. Ante error → `ERROR_RESPONSE` de contingencia.
 
+### `POST /api/verify-qr` (código QR de invitación de Soft-IA) ✅
+El QR lo genera **Soft-IA** y contiene una URL:
+`https://<dominio>/app/control/detalles_visitante/<id_b64>?d=<json_b64>`, donde `d` es un JSON en
+base64 con los datos de la visita, incluido el **`id` de la autorización**. Flujo:
+1. El navegador decodifica el QR con jsQR y envía la URL como `{ code }`.
+2. `backend/app/qr.py` **parsea** la URL y extrae el payload (el `id`).
+3. `backend/app/invitations.py` busca ese `id` en el **libro mayor** `data/invitations.json` (el
+   **estado real** de las autorizaciones del condominio) y decide con el registro almacenado:
+   `vetado == 0`, `estatus == "activo"`, `autorizado_hasta` vigente y, si se configura
+   `CONDOMINIO_ID`, `idcondominios` correcto.
+4. Devuelve un `VerifyResponse` (válido → `open_gate`/`success`; no registrado/vetado/inactivo/
+   vencido/otro condominio → `DENIED`/`show_error`).
+
+> **Seguridad:** la decisión se toma con el libro mayor, **no** con los campos del QR (que van en
+> base64 sin firma y son falsificables). Un QR manipulado que diga "activo" se **deniega** si el
+> registro real está vetado/inactivo. En producción, ese libro mayor debe ser/consultar a
+> **Soft-IA** por `id` (RF-15, ⏳).
+
 ### `POST /api/transcribe` (STT) ✅
 Recibe un clip de audio (`multipart/form-data`) → **faster-whisper** (`vad_filter`, `beam_size=5`,
 carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
@@ -69,8 +87,10 @@ carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
 | Método | Ruta | Descripción | Estado |
 |---|---|---|---|
 | POST | `/api/verify` | Decisión de acceso (texto → JSON estructurado). | ✅ |
+| POST | `/api/verify-qr` | Valida un código QR de invitación (`{ code }` → `VerifyResponse`). | ✅ (validación local) |
 | POST | `/api/transcribe` | STT: audio → `{ text }`. | ✅ |
 | GET | `/api/apartments` | Lista de apartamentos (paridad; el frontend no lo usa hoy). | ✅ |
+| POST | `/api/sync` | Fuerza la sincronización con Soft-IA (además de la periódica). | ✅ |
 | GET | `/health` | Estado y modelos configurados. | ✅ |
 
 **`VerifyRequest`**: `{ message: string, history: {role, text}[], currentAptInput: string }`
@@ -90,10 +110,12 @@ Node resuelve a IPv6 mientras uvicorn escucha en IPv4).
 
 ## 5. Modelo de datos y RAG
 
-- **`backend/data/apartments.json`** — 8 unidades (1A–4B), campos `{ apt, owner, status, notes }`.
-  🟡 *mock* local (fuente de verdad objetivo: Soft-IA). Los residentes, el nombre del condominio y
-  las políticas son **contenido de ejemplo (placeholder)** que se sustituye por el del condominio
-  real al implementar; "Residencias El Ávila / Guatire" no es un destino fijo.
+- **`backend/data/apartments.json`** — propietarios/residentes, campos `{ apt, owner, status, notes }`.
+  Se **alimenta desde Soft-IA** (endpoint de propietarios; apt=`codigo`, owner=`nombre`). ✅
+- **`backend/data/invitations.json`** — **libro mayor de autorizaciones** del condominio: el
+  estado real de cada invitación (`id`, `nombre`, `inmueble`, `propietario`, `idcondominios`,
+  `autorizado_hasta`, `estatus`, `vetado`). El QR solo aporta el `id`; la decisión se toma con este
+  registro (`app/invitations.py`). Se **alimenta desde Soft-IA** (endpoint de autorizaciones). ✅
 - **`backend/knowledge/*.md`** — `politicas.md` (trato, estados, horario, deliveries, QR,
   emergencias) y `procedimientos.md` (mapa de decisión estado/acción/animación). ✅
 - **Ingesta** (`python -m app.ingest`) — un documento por apartamento + *chunks* de los `.md`
@@ -102,20 +124,39 @@ Node resuelve a IPv6 mientras uvicorn escucha en IPv4).
 - **Recuperación** (`backend/app/rag.py`) — `find_apartment` (exacto) + `retrieve_context`
   (semántico). Degradación grácil: devuelve contexto vacío si el índice no existe. ✅
 
-## 6. Capa de integración Soft-IA
+## 6. Integración con Soft-IA (sincronización offline-first)
 
-Punto de extensión clave para el Objetivo 3. Se define un **adaptador REST** (`SoftIAClient`) que
-encapsula las operaciones de Soft-IA (consultar residente, verificar autorización/QR, registrar
-evento). Hoy, la resolución de residentes se hace contra el *mock* `apartments.json`
-(`rag.load_apartments`); el objetivo es reemplazar esa fuente por el cliente REST **sin alterar el
-flujo de `/api/verify`** (misma interfaz de "obtener residente por apartamento/nombre"). Esto aísla
-el prototipo local de la dependencia externa y permite conmutar mock ↔ Soft-IA por configuración.
+Objetivo 3. En lugar de consultar Soft-IA en cada acceso, el backend **sincroniza** los datos a
+archivos locales cada `SOFTIA_SYNC_INTERVAL` segundos, de modo que las verificaciones y
+autorizaciones **funcionan aunque no haya conexión** a Soft-IA (offline-first, RNF-05). ✅
+
+- **`app/softia.py`** — cliente HTTP (`httpx`). Autentica con `SOFTIA_LOGIN_PATH`
+  (usuario+contraseña → token) y consulta con `Authorization: Bearer <token>`:
+  `GET /api/condominio/{id}/propietarios` y `GET /api/condominio/{id}/autorizaciones`.
+  TLS y rutas/campos configurables por entorno.
+- **`app/sync.py`** — mapea propietarios → `apartments.json` (apt=`codigo`, owner=`nombre`) y
+  autorizaciones → `invitations.json` (id=`idautorizacionvisitas`, veto=`flag_vetado`, unidad/dueño
+  por cruce con propietarios vía `idpropietario`). Escribe de forma **atómica** (`os.replace`) e
+  invalida las cachés. Si Soft-IA no responde o devuelve vacío, **conserva los archivos locales**.
+- **Ejecución** — tarea en segundo plano en el ciclo de vida de FastAPI (habilitada con
+  `SOFTIA_ENABLED`), más `POST /api/sync` para forzarla. También `python -m app.sync` (CLI).
+- **Pendiente** ⏳ — registro de eventos de acceso en Soft-IA (RF-14) y verificación de token de
+  sesión propia del backend.
+
+El resto del flujo (`/api/verify`, `/api/verify-qr`) no cambia: siguen leyendo los archivos
+locales, que ahora reflejan el estado de Soft-IA.
 
 ## 7. Interfaz (UI/UX)
 
 **Layout del tótem** (`frontend/src/App.tsx`): panel del **avatar 3D** con burbuja de diálogo,
 **teclado numérico** de apartamento, **barra de voz + micrófono**, panel de **estado de acceso**
 (portón) y **bitácora de conversación** con entrada de texto. ✅
+
+**Escáner de QR** (`frontend/src/components/QrScanner.tsx`): overlay con vista de cámara
+(`getUserMedia` + `MediaStreamTrack`) que decodifica el QR con **jsQR** sobre un `<canvas>` frame a
+frame; al detectar un código llama a `/api/verify-qr` y libera la cámara. Se abre desde el botón de
+QR del tótem o automáticamente cuando `/api/verify` devuelve `action = show_qr_scanner`. Requiere
+**contexto seguro** (`localhost` o HTTPS) para acceder a la cámara. ✅
 
 **Avatar 3D** (`frontend/src/components/VirtualAssistantCanvas.tsx`): modelo **FBX**
 (`assets/Security_Guard.fbx`) cargado con `FBXLoader`, autoescalado y encuadre de busto. Los
@@ -170,8 +211,9 @@ Arranque: `ollama serve` + `ollama pull` de los modelos → `docker compose up -
 | TTS (navegador) | ✅ | — |
 | Decisión de acceso (LLM + RAG) | ✅ | — |
 | Avatar 3D e interfaz | ✅ | — |
-| Datos de residentes | 🟡 mock `apartments.json` | ⏳ Soft-IA (REST) |
-| Portón / intercomunicador / QR / pánico | 🟡 simulados | ⏳ hardware + Soft-IA |
+| Datos de residentes y autorizaciones | ✅ sincronización Soft-IA → JSON local (offline-first) | ⏳ registro de eventos de acceso |
+| Escaneo y validación de QR | ✅ cámara (jsQR) + decisión con libro mayor `invitations.json` por `id` | — |
+| Portón / intercomunicador / pánico | 🟡 simulados | ⏳ hardware + Soft-IA |
 | Registro de eventos / auditoría | ⏳ | ⏳ Soft-IA |
 | Autenticación / roles | ⏳ | ⏳ |
 | Validación (latencia/usabilidad) | ⏳ | ⏳ simulacros |

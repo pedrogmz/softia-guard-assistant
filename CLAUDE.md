@@ -34,7 +34,7 @@ tiempos de respuesta, usabilidad).
 |---|---|
 | 1. Diagnóstico → requerimientos (técnicos/hardware/software) | [requirements.md](docs/requirements.md) |
 | 2. Arquitectura tecnológica + UI/UX | [architecture.md](docs/architecture.md) |
-| 3. Prototipo + integración con Soft-IA | Estado del prototipo marcado en toda la spec; integración en [architecture.md](docs/architecture.md#6-capa-de-integración-soft-ia) |
+| 3. Prototipo + integración con Soft-IA | Estado del prototipo marcado en toda la spec; integración en [architecture.md](docs/architecture.md#6-integración-con-soft-ia-sincronización-offline-first) |
 | 4. Validación (latencia/tiempos/usabilidad) | [requirements.md](docs/requirements.md#7-criterios-de-validación-objetivo-4) |
 
 ## Convención de desarrollo guiado por especificaciones

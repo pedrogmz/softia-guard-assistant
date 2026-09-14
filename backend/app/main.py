@@ -3,18 +3,48 @@ consume (POST /api/verify), pero resuelto con LLM local (Ollama) + RAG (Chroma).
 No genera audio: la voz (TTS/STT) la maneja el navegador."""
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import config, llm, prompt, rag, stt
-from .schemas import Action, Animation, Status, VerifyRequest, VerifyResponse
+from . import config, invitations, llm, prompt, qr, rag, stt, sync
+from .schemas import (
+    Action,
+    Animation,
+    QRVerifyRequest,
+    Status,
+    VerifyRequest,
+    VerifyResponse,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("guard-backend")
 
-app = FastAPI(title="SoftiaGuard - Vigilante Virtual (backend local)")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Arranca la sincronización periódica con Soft-IA si está habilitada."""
+    task = None
+    if config.SOFTIA_ENABLED and config.CONDOMINIO_ID:
+        logger.info("Sincronización con Soft-IA habilitada (cada %ss)", config.SOFTIA_SYNC_INTERVAL)
+        task = asyncio.create_task(sync.sync_loop())
+    else:
+        logger.info("Sincronización con Soft-IA deshabilitada (usa datos locales)")
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(title="SoftiaGuard - Vigilante Virtual (backend local)", lifespan=lifespan)
 
 # El tótem/navegador puede llamar desde el mismo origen (proxy Vite) o directo.
 app.add_middleware(
@@ -44,10 +74,77 @@ def health() -> dict:
     return {"status": "ok", "llm_model": config.LLM_MODEL, "embed_model": config.EMBED_MODEL}
 
 
+@app.post("/api/sync")
+async def trigger_sync() -> dict:
+    """Fuerza una sincronización con Soft-IA (además de la periódica). Útil para
+    pruebas y para refrescar bajo demanda."""
+    return await sync.sync_once()
+
+
 @app.get("/api/apartments")
 def list_apartments() -> list:
     """Paridad con el backend original (server.ts:127). El frontend actual no lo usa."""
     return rag.load_apartments()
+
+
+# Mensajes de denegación por motivo de rechazo del QR
+QR_DENY_MESSAGES = {
+    "invalid_format": "No pude leer el código QR. Verifique que sea una invitación válida.",
+    "not_found": "Esta invitación no está registrada o ya no es válida. Por favor, contacte al residente.",
+    "wrong_condominio": "Este código QR pertenece a otro condominio y no es válido aquí.",
+    "vetado": "Lo siento, el acceso de este visitante está restringido. Por favor, contacte a la administración.",
+    "inactivo": "Esta invitación no se encuentra activa. Por favor, contacte al residente.",
+    "expired": "Su autorización de visita ha vencido. Por favor, solicite una nueva al residente.",
+}
+
+
+@app.post("/api/verify-qr", response_model=VerifyResponse)
+def verify_qr(request: QRVerifyRequest) -> VerifyResponse:
+    """Valida el QR de invitación de Soft-IA. El QR (URL con JSON en base64) aporta
+    el `id` de la autorización; la decisión se toma con el ESTADO REAL almacenado en
+    el libro mayor `invitations.json` (no con lo que traiga el QR, que es
+    falsificable). Objetivo (RF-15): que ese libro mayor sea/consulte a Soft-IA."""
+    try:
+        payload = qr.parse_qr(request.code)
+        if not payload:
+            return _qr_denied("invalid_format")
+
+        record = invitations.find_authorization(payload.get("id"))
+        if not record:
+            return _qr_denied("not_found")
+
+        reason = invitations.check_state(record)
+        nombre = record.get("nombre") or "Visitante"
+        inmueble = record.get("inmueble")
+        propietario = record.get("propietario")
+
+        if reason == "ok":
+            return VerifyResponse(
+                reply=(
+                    f"¡Bienvenido, {nombre}! Su invitación al inmueble {inmueble} "
+                    f"(residencia de {propietario}) es válida. Abriendo el portón."
+                ),
+                apartment=inmueble,
+                status=Status.APPROVED,
+                owner=propietario,
+                action=Action.open_gate,
+                assistant_animation=Animation.success,
+            )
+        return _qr_denied(reason, apt=inmueble, owner=propietario)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en /api/verify-qr: %s", exc)
+        return ERROR_RESPONSE
+
+
+def _qr_denied(reason: str, apt: Optional[str] = None, owner: Optional[str] = None) -> VerifyResponse:
+    return VerifyResponse(
+        reply=QR_DENY_MESSAGES.get(reason, "El código QR no es válido."),
+        apartment=apt,
+        status=Status.DENIED,
+        owner=owner,
+        action=Action.show_error,
+        assistant_animation=Animation.denied,
+    )
 
 
 @app.post("/api/transcribe")

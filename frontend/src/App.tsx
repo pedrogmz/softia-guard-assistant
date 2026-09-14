@@ -16,6 +16,7 @@ import {
   VolumeX
 } from "lucide-react";
 import VirtualAssistantCanvas from "./components/VirtualAssistantCanvas";
+import QrScanner from "./components/QrScanner";
 import { motion, AnimatePresence } from "motion/react";
 const BUILDING_NAME = import.meta.env.VITE_BUILDING_NAME;
 
@@ -39,6 +40,8 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   // Transcribiendo el audio de voz en el backend (feedback tras hablar)
   const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
+  // Escáner de código QR (cámara) abierto/cerrado
+  const [qrScannerOpen, setQrScannerOpen] = useState<boolean>(false);
   const [animationState, setAnimationState] = useState<"idle" | "talking" | "scanning" | "success" | "denied">("idle");
 
   // Audio Feedback (Text-to-Speech & Speech-to-Text)
@@ -266,6 +269,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [apartmentInput]);
 
+  // Aplica una respuesta del asistente a la UI (compartida por /api/verify y /api/verify-qr)
+  const applyAssistantResponse = (data: any) => {
+    setChatHistory((prev) => [...prev, { role: "assistant", text: data.reply }]);
+    setAnimationState(data.assistant_animation || "talking");
+    speakText(data.reply);
+    if (data.apartment) setIdentifiedApt(data.apartment);
+    if (data.owner) setIdentifiedOwner(data.owner);
+    handleTotemAction(data.action, data.apartment, data.owner);
+  };
+
   // Main API query logic for verification
   const handleSendRequest = async (userMsg: string) => {
     if (!userMsg.trim()) return;
@@ -288,24 +301,7 @@ export default function App() {
       });
 
       const data = await response.json();
-
-      setChatHistory((prev) => [
-        ...prev,
-        { role: "assistant", text: data.reply },
-      ]);
-
-      setAnimationState(data.assistant_animation || "talking");
-      speakText(data.reply);
-
-      // Apply dynamic actions from Gemini response
-      if (data.apartment) {
-        setIdentifiedApt(data.apartment);
-      }
-      if (data.owner) {
-        setIdentifiedOwner(data.owner);
-      }
-
-      handleTotemAction(data.action, data.apartment, data.owner);
+      applyAssistantResponse(data);
 
     } catch (error) {
       console.error("Verification failed:", error);
@@ -341,7 +337,8 @@ export default function App() {
       }, 4000);
     } else if (action === "show_qr_scanner") {
       setAnimationState("scanning");
-      speakText("Coloque su código QR frente a la cámara superior.");
+      speakText("Coloque su código QR frente a la cámara para escanearlo.");
+      setQrScannerOpen(true);
     } else if (action === "show_error") {
       setAnimationState("denied");
     }
@@ -357,17 +354,40 @@ export default function App() {
     handleSendRequest(aptMsg);
   };
 
-  // Simulate scanning of pre-approved QR code (Matches original image scenario)
-  const handleSimulateQRScan = () => {
-    setScannedQR(true);
-    setAnimationState("scanning");
-    speakText("Código QR detectado. Leyendo credenciales.");
+  // Abrir el escáner de QR (cámara real)
+  const handleOpenQrScanner = () => {
+    setQrScannerOpen(true);
+  };
 
-    setTimeout(() => {
-      // Direct call simulating 4B Pre-approved QR
-      const mockMsg = "He escaneado su Código QR de invitación de Elena Rivas para el Apartamento 4B.";
-      handleSendRequest(mockMsg);
-    }, 1500);
+  // Resultado del escáner: valida el código contra el backend (/api/verify-qr)
+  const handleQrResult = async (code: string) => {
+    setQrScannerOpen(false);
+    setScannedQR(true);
+    setChatHistory((prev) => [
+      ...prev,
+      { role: "user", text: "Código QR presentado" },
+    ]);
+    setIsProcessing(true);
+    setAnimationState("scanning");
+    speakText("Código QR detectado. Verificando credenciales.");
+
+    try {
+      const response = await fetch("/api/verify-qr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const data = await response.json();
+      applyAssistantResponse(data);
+    } catch (error) {
+      console.error("QR verification failed:", error);
+      const errorMsg = "Disculpe, no pude verificar el código en este momento. Intente de nuevo o use el intercomunicador.";
+      setChatHistory((prev) => [...prev, { role: "assistant", text: errorMsg }]);
+      setAnimationState("denied");
+      speakText(errorMsg);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Red Panic Button Click Handler
@@ -438,8 +458,8 @@ export default function App() {
 
               {/* Quick Simulate QR Action on top right of screen */}
               <button
-                onClick={handleSimulateQRScan}
-                title="Simular Escaneo Código QR"
+                onClick={handleOpenQrScanner}
+                title="Escanear Código QR"
                 className="absolute top-6 right-6 p-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white transition-all backdrop-blur-md z-10 cursor-pointer"
               >
                 <QrCode className="w-5 h-5" />
@@ -602,7 +622,7 @@ export default function App() {
               {/* Simulaciones */}
               <div className="space-y-4 pt-6 mt-6 border-t border-white/5">
                 <button
-                  onClick={handleSimulateQRScan}
+                  onClick={handleOpenQrScanner}
                   className="px-2.5 py-1 rounded-lg bg-emerald-950/20 border border-emerald-500/20 hover:border-emerald-500/50 text-emerald-400 hover:text-emerald-300 transition-all cursor-pointer font-mono text-[10px]"
                 >
                   [Escanear QR]
@@ -784,6 +804,10 @@ export default function App() {
           <span>Privacidad</span>
         </div>
       </footer>
+
+      {qrScannerOpen && (
+        <QrScanner onResult={handleQrResult} onClose={() => setQrScannerOpen(false)} />
+      )}
 
     </div>
   );

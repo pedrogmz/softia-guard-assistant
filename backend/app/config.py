@@ -18,6 +18,36 @@ DATA_DIR: Path = BASE_DIR / "data"
 KNOWLEDGE_DIR: Path = BASE_DIR / "knowledge"
 
 APARTMENTS_FILE: Path = DATA_DIR / "apartments.json"
+# Libro mayor de autorizaciones del condominio (estado real de cada invitación).
+# El QR aporta el id; la decisión se toma según el estado almacenado aquí.
+INVITATIONS_FILE: Path = DATA_DIR / "invitations.json"
+
+# Soft-IA: id del condominio destino. Se usa para (1) rechazar códigos QR de otro
+# condominio y (2) como parámetro de la sincronización con Soft-IA. Vacío = sin verificar / sin sync.
+CONDOMINIO_ID = os.getenv("CONDOMINIO_ID") or None
+
+# --- Sincronización con Soft-IA (alimenta apartments.json e invitations.json) ---
+# Los datos se guardan en local para operar sin conexión constante; la sync los
+# refresca cada SOFTIA_SYNC_INTERVAL segundos. Deshabilitada por defecto.
+def _flag(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+SOFTIA_ENABLED: bool = _flag("SOFTIA_ENABLED", "false")
+SOFTIA_BASE_URL: str = os.getenv("SOFTIA_BASE_URL", "https://php.apiq-soft-ia.orb.local")
+SOFTIA_SYNC_INTERVAL: int = int(os.getenv("SOFTIA_SYNC_INTERVAL", "300"))  # segundos
+SOFTIA_VERIFY_TLS: bool = _flag("SOFTIA_VERIFY_TLS", "false")  # off en local orb.local
+
+# Login (usuario+contraseña -> token). Rutas/campos configurables (por defecto estilo Lexik JWT).
+SOFTIA_LOGIN_PATH: str = os.getenv("SOFTIA_LOGIN_PATH", "/api/login_check")
+SOFTIA_USERNAME: str = os.getenv("SOFTIA_USERNAME", "")
+SOFTIA_PASSWORD: str = os.getenv("SOFTIA_PASSWORD", "")
+SOFTIA_USERNAME_FIELD: str = os.getenv("SOFTIA_USERNAME_FIELD", "username")
+SOFTIA_PASSWORD_FIELD: str = os.getenv("SOFTIA_PASSWORD_FIELD", "password")
+SOFTIA_TOKEN_FIELD: str = os.getenv("SOFTIA_TOKEN_FIELD", "token")
+
+# Rutas de datos (plantillas; {id} = idcondominio)
+SOFTIA_PROPIETARIOS_PATH: str = os.getenv("SOFTIA_PROPIETARIOS_PATH", "/api/condominio/{id}/propietarios")
+SOFTIA_AUTORIZACIONES_PATH: str = os.getenv("SOFTIA_AUTORIZACIONES_PATH", "/api/condominio/{id}/autorizaciones")
 
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
 PORT: int = int(os.getenv("PORT", "8000"))

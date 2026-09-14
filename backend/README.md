@@ -10,7 +10,9 @@ de entrada (STT)** se transcribe aquí con **Whisper local**, así que el audio 
 | Método | Ruta | Descripción |
 |---|---|---|
 | POST | `/api/verify` | Verificación de acceso (texto → JSON estructurado con LLM + RAG) |
+| POST | `/api/verify-qr` | Valida el QR de invitación de Soft-IA: parsea `{ code }`, toma el `id` y decide con el estado real del libro mayor `data/invitations.json` → `VerifyResponse` |
 | POST | `/api/transcribe` | STT: recibe un clip de audio y devuelve `{ text }` (Whisper local) |
+| POST | `/api/sync` | Fuerza la sincronización con Soft-IA (propietarios/autorizaciones → JSON local) |
 | GET | `/api/apartments` | Lista los apartamentos (paridad; el frontend no lo usa) |
 | GET | `/health` | Estado y modelos configurados |
 
@@ -103,6 +105,25 @@ Abre el tótem en `http://localhost:3000`. El backend queda en `http://localhost
 > corras `app.ingest`). Para correr Ollama **también** en Docker (CPU en Mac, GPU NVIDIA en
 > Linux), descomenta el servicio `ollama` en `docker-compose.yml` y cambia `OLLAMA_HOST` del
 > backend a `http://ollama:11434`.
+
+## Sincronización con Soft-IA (offline-first)
+
+El backend puede alimentar `data/apartments.json` (propietarios) e `data/invitations.json`
+(autorizaciones) desde Soft-IA cada `SOFTIA_SYNC_INTERVAL` segundos, y opera contra esos archivos
+locales para **verificar accesos aunque no haya conexión**. Si Soft-IA no responde, se conservan
+los datos locales.
+
+Configúralo en `.env` (ver `.env.example`): `SOFTIA_ENABLED=true`, `CONDOMINIO_ID=<id>`,
+`SOFTIA_BASE_URL`, credenciales de login (`SOFTIA_USERNAME`/`SOFTIA_PASSWORD`) y, si difieren, las
+rutas/campos (`SOFTIA_LOGIN_PATH`, `SOFTIA_*_FIELD`, `SOFTIA_*_PATH`). `SOFTIA_VERIFY_TLS=false`
+para el entorno local `orb.local`.
+
+```bash
+# Sincronización manual (además de la periódica en segundo plano)
+docker compose exec backend python -m app.sync
+# o vía HTTP
+curl -s -X POST http://localhost:8000/api/sync
+```
 
 ## Seguridad
 

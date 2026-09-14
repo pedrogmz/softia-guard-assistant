@@ -25,13 +25,13 @@ este diagnóstico se derivan los requerimientos siguientes.
 | RF-06 | Devolver una **respuesta estructurada** (estado de acceso, acción del tótem y animación del avatar). | ✅ |
 | RF-07 | Mostrar un **avatar 3D** del vigilante con estados visuales (espera/habla/escanea/éxito/denegado). | ✅ |
 | RF-08 | Dar **feedback de procesamiento** al usuario (escuchando / entendiendo / verificando). | ✅ |
-| RF-09 | Atender **invitados con código QR** pre-aprobados. | 🟡 (simulado; hardcodeado a la unidad 4B) |
+| RF-09 | Atender **invitados con código QR** pre-aprobados: escaneo real del QR con la cámara del tótem. | ✅ (escaneo real con jsQR; validación local) |
 | RF-10 | **Abrir/cerrar el portón** (acceso peatonal y vehicular) según la decisión. | 🟡 (simulado en el frontend) |
 | RF-11 | **Contactar al residente** por intercomunicador antes de autorizar. | 🟡 (simulado con temporizador) |
 | RF-12 | **Botón de pánico** / alerta de emergencia. | 🟡 (simulado) |
-| RF-13 | Consultar **residentes y autorizaciones** desde Soft-IA. | ⏳ (hoy: mock local) |
+| RF-13 | Consultar **residentes y autorizaciones** desde Soft-IA y mantenerlos en local (sincronización periódica, offline-first). | ✅ (operativa; el bucle automático requiere `SOFTIA_ENABLED=true`) |
 | RF-14 | Registrar cada **evento de acceso** (entrada/decisión) en Soft-IA para auditoría. | ⏳ |
-| RF-15 | Verificar la **validez de un código QR** de invitación contra Soft-IA. | ⏳ (hoy: simulado) |
+| RF-15 | Verificar la **validez del QR de invitación** buscando su `id` en el libro mayor de autorizaciones y decidiendo con el **estado real** (`estatus`/`vetado`/vigencia; opcional `idcondominios`). | 🟡 (libro mayor local `invitations.json`; provisto por Soft-IA ⏳) |
 
 > Nota: el acceso **vehicular** se limita a RF-10 (control de portón). No se contempla
 > reconocimiento automático de placas (ANPR/LPR) — ver alcance en [overview.md](overview.md#alcance).
@@ -44,7 +44,7 @@ este diagnóstico se derivan los requerimientos siguientes.
 | RNF-02 | **Privacidad**: el audio del visitante se procesa localmente y no se envía a terceros. | ✅ |
 | RNF-03 | **Latencia y tiempos de respuesta** dentro de objetivos medibles (ver §7). | ⏳ (a validar) |
 | RNF-04 | **Usabilidad**: interacción natural por voz con retroalimentación continua en cada fase. | ✅ / a validar |
-| RNF-05 | **Degradación grácil**: el backend responde aunque falte el índice RAG o falle una etapa. | ✅ |
+| RNF-05 | **Degradación grácil / offline-first**: el backend responde aunque falte el índice RAG o falle una etapa; los datos de Soft-IA se guardan en local para verificar accesos **sin conexión**. | ✅ |
 | RNF-06 | **Idioma**: español formal (trato de "usted"), respuestas concisas (máx. ~3 frases). | ✅ |
 | RNF-07 | **Seguridad**: `.env` fuera del control de versiones; rotar la `GEMINI_API_KEY` heredada; autenticación/roles a futuro. | 🟡 |
 | RNF-08 | **Portabilidad / despliegue**: contenedores Docker; Ollama nativo en el host para aprovechar GPU/Metal. | ✅ |
@@ -78,20 +78,23 @@ STT Whisper `small` (device `cpu`, compute `int8`, idioma `es`).
 > Detalle de versiones y configuración por defecto en [architecture.md](architecture.md) y en
 > `backend/app/config.py`.
 
-## 6. Integración con Soft-IA (REST) ⏳
+## 6. Integración con Soft-IA (REST)
 
-El asistente debe integrarse con Soft-IA mediante **API REST**. Operaciones requeridas:
+El asistente se integra con Soft-IA mediante **API REST** con enfoque **offline-first**: sincroniza
+los datos a archivos locales y opera contra ellos, para no depender de conexión constante.
 
-| Operación | Descripción |
-|---|---|
-| **Consultar residente** | Obtener datos y estado del residente por apartamento o por nombre. |
-| **Verificar autorización** | Confirmar si un visitante/QR está autorizado para un apartamento. |
-| **Registrar evento** | Persistir cada acceso/decisión (auditoría) en Soft-IA. |
+| Operación | Descripción | Estado |
+|---|---|---|
+| **Sincronizar propietarios** | `GET /api/condominio/{id}/propietarios` → `apartments.json` (apt=`codigo`, owner=`nombre`). | ✅ |
+| **Sincronizar autorizaciones** | `GET /api/condominio/{id}/autorizaciones` → `invitations.json` (id=`idautorizacionvisitas`, veto=`flag_vetado`, unidad/dueño por cruce con propietarios). | ✅ |
+| **Autenticación** | Login (usuario+contraseña → token) y `Bearer` en cada consulta. | ✅ |
+| **Registrar evento** | Persistir cada acceso/decisión (auditoría) en Soft-IA. | ⏳ |
 
-Estado actual: **no existe integración**. Los datos de residentes son un *mock* local
-(`backend/data/apartments.json`, 8 unidades) cargado en memoria. La arquitectura define una capa
-de adaptador (`SoftIAClient`) para reemplazar el mock por el cliente REST sin cambiar el resto del
-flujo — ver [architecture.md](architecture.md#6-capa-de-integración-soft-ia).
+Implementado y verificado con datos reales: cliente `app/softia.py` + sincronización periódica
+`app/sync.py` (tarea en el ciclo de vida de FastAPI + `POST /api/sync` + CLI `python -m app.sync`),
+con escritura atómica y conservación de los datos locales si Soft-IA no responde. Pendiente: el
+**registro de eventos** de acceso (auditoría). Detalle en
+[architecture.md](architecture.md#6-integración-con-soft-ia-sincronización-offline-first).
 
 ## 7. Criterios de validación (Objetivo 4)
 
@@ -116,5 +119,6 @@ Validación mediante **simulacros de acceso controlados**, midiendo:
 | **Identidad del condominio como contenido placeholder** (RNF-10) | La identidad (nombre, ubicación, residentes, políticas) vive como **contenido de ejemplo** en el backend: el prompt (`prompt.py`), `knowledge/*.md` y `apartments.json` usan "Residencias El Ávila / Guatire"; el frontend usa `VITE_BUILDING_NAME` y "Guatire, VZLA" en el header. **Todo lo fijo se sustituye por el condominio real al momento de la implementación** (no es un defecto). Mejora propuesta para multi-condominio: hacerla **dirigida por configuración** en vez de editar código fuente. Nota menor: hoy los placeholders de frontend ("Valle Blanco") y backend ("El Ávila") difieren entre sí. |
 | **`VITE_APP_NAME` sin uso** | Definida en `.env` pero no consumida en `App.tsx`. |
 | **Restos del backend Gemini** | Referencias obsoletas en `frontend/metadata.json` y comentarios; rotar/eliminar `GEMINI_API_KEY` heredada. |
-| **QR hardcodeado** | `handleSimulateQRScan` fija la unidad 4B/Elena Rivas; debe validarse contra Soft-IA. |
+| **Registro de eventos en Soft-IA (RF-14)** | La sync ya alimenta `apartments.json`/`invitations.json` desde Soft-IA (verificado). Falta persistir cada acceso/decisión en Soft-IA para auditoría. |
+| **Refresco del índice RAG tras sync** | `find_apartment` lee `apartments.json` fresco, pero los documentos de apartamentos en ChromaDB quedan del estado anterior hasta re-ejecutar `python -m app.ingest`. |
 | **Acciones físicas simuladas** | Portón, intercomunicador y pánico usan `setTimeout`; requieren integración con hardware/Soft-IA. |

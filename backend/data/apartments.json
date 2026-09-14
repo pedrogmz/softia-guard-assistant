@@ -1,10 +1,428 @@
 [
-  { "apt": "1A", "owner": "María Mendoza", "status": "Disponible", "notes": "Llamar para verificar siempre." },
-  { "apt": "1B", "owner": "Carlos Rodríguez", "status": "No Molestar", "notes": "No recibe visitas no programadas." },
-  { "apt": "2A", "owner": "Alejandro Gómez", "status": "Disponible", "notes": "Espera un delivery de comida o paquete. Autorizar si es repartidor." },
-  { "apt": "2B", "owner": "Valentina Silva", "status": "Disponible", "notes": "Tiene invitados autorizados hoy." },
-  { "apt": "3A", "owner": "Francisco Tocuyo", "status": "Fuera de la Ciudad", "notes": "No se permite el acceso a nadie. Casa vacía." },
-  { "apt": "3B", "owner": "Diana Carolina", "status": "Disponible", "notes": "Permite acceso directo a familiares." },
-  { "apt": "4A", "owner": "Roberto Pérez", "status": "Disponible", "notes": "Llamar primero al intercomunicador." },
-  { "apt": "4B", "owner": "Elena Rivas", "status": "Esperando Visita", "notes": "Invitado con Código QR pre-aprobado para hoy." }
+  {
+    "apt": "704",
+    "owner": "Alejandra Martínez Aguilar",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "503",
+    "owner": "Ana Ize Ludlow",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "404",
+    "owner": "Ana María Goyenechea",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "602",
+    "owner": "Ana Sofia Kuthy Cacho",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "103",
+    "owner": "Andrea Castillo Keller",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "103",
+    "owner": "Andrea Castillo Keller",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "103",
+    "owner": "Andrea Castillo Keller",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1602",
+    "owner": "Antonio Villalvazo Rojas",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "703",
+    "owner": "Arturo Zavala Cabrera",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "603",
+    "owner": "Beatriz Gómez García",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "204",
+    "owner": "Bianca Buelfil",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "PH2",
+    "owner": "Celeste Ximena Jiménez Mejorada",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "D-1",
+    "owner": "Dagoberto Nuñez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1202",
+    "owner": "Eduardo Alcalá",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1001",
+    "owner": "Eloy Edmundo Guzmán Renaud",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "903",
+    "owner": "Ernesto Ramos",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "303",
+    "owner": "Fabiola Mendez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "401",
+    "owner": "Fernanda Rendón",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "J-1",
+    "owner": "Francisco Acevedo",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "J-1",
+    "owner": "Francisco Acevedo",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "J-1",
+    "owner": "Francisco Acevedo",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1203",
+    "owner": "Gloria Murillo Bagundo",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "402",
+    "owner": "Jorge Kaire",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "201",
+    "owner": "Jorge Méndez García",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1103",
+    "owner": "José Antonio Salcido",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "101",
+    "owner": "Juan José Serrato",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "L-1",
+    "owner": "Lisseth Goncalves",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "L-1",
+    "owner": "Lisseth Goncalves",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "L-1",
+    "owner": "Lisseth Goncalves",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "801",
+    "owner": "Lourdes Gómez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1603",
+    "owner": "Lucia Jaireguiberry",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "802",
+    "owner": "Luciana Ludlow",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1201",
+    "owner": "Manuel Leonardo Ruíz Flores",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1503",
+    "owner": "Mara de Anda",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "804",
+    "owner": "María Luisa Iñarra Uroz",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "104",
+    "owner": "Mariana Cristina Keller Pérez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "604",
+    "owner": "Maricela Flores Roa",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1204",
+    "owner": "Miguel ángel Castillo González",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1004",
+    "owner": "Miguel Arriaga",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1504",
+    "owner": "Mónica de la Salud Arriaga Diez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "202",
+    "owner": "Nahum Rodrigo Flores Meza",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1403",
+    "owner": "Nicolás Mier y Terán",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "O-1",
+    "owner": "Oriana Serrades",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "904",
+    "owner": "Óscar Pérez Palacios",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1404",
+    "owner": "Patricia Alejandra Castillo González",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "F-1",
+    "owner": "Paul Espinoza",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "F-1",
+    "owner": "Paul Espinoza",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "F-1",
+    "owner": "Paul Espinoza",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1604",
+    "owner": "Paulina Prieto",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "P-1",
+    "owner": "Pedro Góme",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "P-1",
+    "owner": "Pedro Góme",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "P-1",
+    "owner": "Pedro Góme",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "N-1",
+    "owner": "PROPIETARIO NUEVO",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "N-1",
+    "owner": "PROPIETARIO NUEVO",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "N-1",
+    "owner": "PROPIETARIO NUEVO",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "PRUEBA 0",
+    "owner": "PRUEBA ALICUOTA 0",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "304",
+    "owner": "Rafael Sánchez Navarro",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "403",
+    "owner": "Raúl Alfredo Hudlet Yañez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1104",
+    "owner": "Ricardo Rodríguez Contreras",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "R-1",
+    "owner": "Rini Yepez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "R-1",
+    "owner": "Rini Yepez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "R-1",
+    "owner": "Rini Yepez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "203",
+    "owner": "Rosario Susana Linda Keller Torres",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "601",
+    "owner": "Sandra Alva Muñoz",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "504",
+    "owner": "Sara Lopez",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "PH1",
+    "owner": "Sergio I. Hernández Ruiz",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "Casa 1-3",
+    "owner": "Serrades",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1601",
+    "owner": "Susana Weinstock",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1003",
+    "owner": "Verónica de Jesús González Ruíz",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "1002",
+    "owner": "Virgen Murguia",
+    "status": "Disponible",
+    "notes": ""
+  },
+  {
+    "apt": "803",
+    "owner": "Yolanda Vallejo de Villa",
+    "status": "Disponible",
+    "notes": ""
+  }
 ]

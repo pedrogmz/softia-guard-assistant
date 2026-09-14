@@ -18,6 +18,11 @@ class VerifyRequest(BaseModel):
     currentAptInput: Optional[str] = ""
 
 
+class QRVerifyRequest(BaseModel):
+    # Texto decodificado del código QR en el navegador
+    code: str = ""
+
+
 class Status(str, Enum):
     APPROVED = "APPROVED"
     PENDING_CONFIRMATION = "PENDING_CONFIRMATION"

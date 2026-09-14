@@ -84,8 +84,15 @@ Existe un **prototipo funcional** end-to-end:
 Pendiente para cumplir el objetivo completo:
 
 - ⏳ **Integración real con Soft-IA** (hoy los datos de residentes son un *mock* local estático).
-- 🟡 **Acciones físicas** (portón, intercomunicador, código QR, botón de pánico) están
-  **simuladas** en el frontend; falta integración con hardware real.
+- ✅ **Escaneo de código QR** real (cámara + jsQR) del QR de invitación de Soft-IA; el QR aporta el
+  `id` y la decisión se toma con el **estado real** del libro mayor de autorizaciones
+  (`invitations.json`).
+- ✅ **Sincronización con Soft-IA** (offline-first): el backend alimenta `apartments.json` e
+  `invitations.json` desde los endpoints de Soft-IA y opera contra los archivos locales, para
+  verificar accesos **sin conexión constante** (verificado con datos reales). Falta el registro de
+  eventos de acceso (⏳).
+- 🟡 **Acciones físicas** (portón, intercomunicador, botón de pánico) están **simuladas** en el
+  frontend; falta integración con hardware real.
 - ⏳ **Validación** formal de latencia/tiempos de respuesta/usabilidad mediante simulacros.
 - 🟡 **Identidad del condominio como placeholder**: nombre, residentes y políticas son contenido
   de ejemplo ("El Ávila" en el backend, "Valle Blanco" en el frontend) que se **sustituye por el
