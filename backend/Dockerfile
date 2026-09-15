@@ -4,9 +4,11 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Dependencias de sistema mínimas para chromadb (compila algunas ruedas)
+# Dependencias de sistema: build (ruedas de chromadb) + Tesseract OCR (cédula, español)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    tesseract-ocr \
+    tesseract-ocr-spa \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

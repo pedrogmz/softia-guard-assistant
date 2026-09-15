@@ -9,7 +9,8 @@
     "idpropietario": "199630",
     "autorizado_hasta": "2024-12-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": null
   },
   {
     "id": "1474",
@@ -21,7 +22,8 @@
     "idpropietario": "199630",
     "autorizado_hasta": "2025-01-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "26262626"
   },
   {
     "id": "1615",
@@ -33,7 +35,8 @@
     "idpropietario": "221532",
     "autorizado_hasta": "2099-12-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "04141234567"
   },
   {
     "id": "1437",
@@ -45,7 +48,8 @@
     "idpropietario": "0",
     "autorizado_hasta": "2024-12-18",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": null
   },
   {
     "id": "1441",
@@ -57,7 +61,8 @@
     "idpropietario": "221531",
     "autorizado_hasta": "2024-12-17",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": null
   },
   {
     "id": "1715",
@@ -69,7 +74,8 @@
     "idpropietario": "221532",
     "autorizado_hasta": "2025-09-26",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "584244049959"
   },
   {
     "id": "1720",
@@ -81,7 +87,8 @@
     "idpropietario": "222210",
     "autorizado_hasta": "2025-09-30",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584128870583"
   },
   {
     "id": "1732",
@@ -93,7 +100,8 @@
     "idpropietario": "221532",
     "autorizado_hasta": "2025-10-02",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584145949275"
   },
   {
     "id": "2606",
@@ -105,7 +113,8 @@
     "idpropietario": "222210",
     "autorizado_hasta": "2026-03-19",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584244563136"
   },
   {
     "id": "2475",
@@ -117,7 +126,8 @@
     "idpropietario": "221532",
     "autorizado_hasta": "2026-02-18",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584265516208"
   },
   {
     "id": "1439",
@@ -129,7 +139,8 @@
     "idpropietario": "221532",
     "autorizado_hasta": "2024-12-17",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": null
   },
   {
     "id": "1438",
@@ -141,7 +152,8 @@
     "idpropietario": "0",
     "autorizado_hasta": "2024-12-27",
     "estatus": "activo",
-    "vetado": 1
+    "vetado": 1,
+    "telefono": null
   },
   {
     "id": "1698",
@@ -153,7 +165,8 @@
     "idpropietario": "222210",
     "autorizado_hasta": "2025-10-11",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584144166797"
   },
   {
     "id": "2274",
@@ -165,7 +178,8 @@
     "idpropietario": "221532",
     "autorizado_hasta": "2026-01-21",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584143580164"
   },
   {
     "id": "1478",
@@ -177,19 +191,21 @@
     "idpropietario": "199629",
     "autorizado_hasta": "2025-07-29",
     "estatus": "eliminado",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584121250398"
   },
   {
-    "id": "3366",
+    "id": "3467",
     "nombre": "Pedro",
-    "cedula": 24088898,
+    "cedula": 0,
     "idcondominios": "3304",
     "inmueble": "P-1",
     "propietario": "Pedro Góme",
     "idpropietario": "199629",
     "autorizado_hasta": "2026-09-30",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584242207089"
   },
   {
     "id": "1440",
@@ -201,7 +217,8 @@
     "idpropietario": "199629",
     "autorizado_hasta": "2025-07-29",
     "estatus": "eliminado",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": null
   },
   {
     "id": "1476",
@@ -213,7 +230,8 @@
     "idpropietario": "0",
     "autorizado_hasta": "2025-01-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": null
   },
   {
     "id": "1479",
@@ -225,7 +243,8 @@
     "idpropietario": "180513",
     "autorizado_hasta": "2025-01-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": ""
   },
   {
     "id": "1480",
@@ -237,7 +256,8 @@
     "idpropietario": "180513",
     "autorizado_hasta": "2025-01-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": ""
   },
   {
     "id": "1481",
@@ -249,7 +269,8 @@
     "idpropietario": "221531",
     "autorizado_hasta": "2025-01-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": ""
   },
   {
     "id": "1482",
@@ -261,7 +282,8 @@
     "idpropietario": "221531",
     "autorizado_hasta": "2025-01-31",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "04121234567"
   },
   {
     "id": "2275",
@@ -273,6 +295,7 @@
     "idpropietario": "221532",
     "autorizado_hasta": "2026-01-21",
     "estatus": "activo",
-    "vetado": 0
+    "vetado": 0,
+    "telefono": "+584247712731"
   }
 ]

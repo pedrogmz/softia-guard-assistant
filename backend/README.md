@@ -12,6 +12,8 @@ de entrada (STT)** se transcribe aquí con **Whisper local**, así que el audio 
 | POST | `/api/verify` | Verificación de acceso (texto → JSON estructurado con LLM + RAG) |
 | POST | `/api/verify-qr` | Valida el QR de invitación de Soft-IA: parsea `{ code }`, toma el `id` y decide con el estado real del libro mayor `data/invitations.json` → `VerifyResponse` |
 | POST | `/api/transcribe` | STT: recibe un clip de audio y devuelve `{ text }` (Whisper local) |
+| POST | `/api/identify` | Identifica por nombre + recoge datos faltantes (nombre/cédula/teléfono) → `GateResponse` |
+| POST | `/api/verify-cedula` | OCR local (Tesseract) de la cédula mostrada a la cámara → `{ cedula, match }` |
 | POST | `/api/sync` | Fuerza la sincronización con Soft-IA (propietarios/autorizaciones → JSON local) |
 | GET | `/api/apartments` | Lista los apartamentos (paridad; el frontend no lo usa) |
 | GET | `/health` | Estado y modelos configurados |
@@ -113,10 +115,16 @@ El backend puede alimentar `data/apartments.json` (propietarios) e `data/invitat
 locales para **verificar accesos aunque no haya conexión**. Si Soft-IA no responde, se conservan
 los datos locales.
 
+Además, al **autorizar un acceso por QR** se registra la visita de vuelta en Soft-IA
+(`POST /api/condominio/{id}/visitas`, RF-14), en segundo plano; si Soft-IA no responde por red, el
+evento se **encola** en `data/pending_visitas.json` y se reintenta en el siguiente ciclo (un rechazo
+4xx —vencida/no existe— se descarta).
+
 Configúralo en `.env` (ver `.env.example`): `SOFTIA_ENABLED=true`, `CONDOMINIO_ID=<id>`,
 `SOFTIA_BASE_URL`, credenciales de login (`SOFTIA_USERNAME`/`SOFTIA_PASSWORD`) y, si difieren, las
-rutas/campos (`SOFTIA_LOGIN_PATH`, `SOFTIA_*_FIELD`, `SOFTIA_*_PATH`). `SOFTIA_VERIFY_TLS=false`
-para el entorno local `orb.local`.
+rutas/campos (`SOFTIA_LOGIN_PATH`, `SOFTIA_*_FIELD`, `SOFTIA_*_PATH`, `SOFTIA_VISITAS_PATH`).
+`SOFTIA_VERIFY_TLS=false` para el entorno local `orb.local`. `SOFTIA_ENABLED=true` activa la sync
+periódica **y** el registro de visitas.
 
 ```bash
 # Sincronización manual (además de la periódica en segundo plano)

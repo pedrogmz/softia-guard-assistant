@@ -31,7 +31,10 @@ Guía de coherencia entre campos:
 - Pedir escanear Código QR -> PENDING_CONFIRMATION, show_qr_scanner, scanning.
 - Acceso denegado -> DENIED, show_error, denied.
 - Saludo o falta de información -> IDENTIFYING, none, talking.
-- Error o apartamento inexistente -> ERROR, show_error, denied."""
+- Error o apartamento inexistente -> ERROR, show_error, denied.
+- Si el visitante dice ser un INVITADO con autorización/invitación (no un residente) o da su
+  nombre para que lo verifiques como visita autorizada -> IDENTIFYING, collect_info, talking, y en
+  "reply" pídele amablemente su nombre completo para verificar su autorización."""
 
 
 def _apartment_block(apartment: Optional[dict]) -> str:

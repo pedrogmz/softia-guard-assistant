@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import VirtualAssistantCanvas from "./components/VirtualAssistantCanvas";
 import QrScanner from "./components/QrScanner";
+import IdScanner from "./components/IdScanner";
 import { motion, AnimatePresence } from "motion/react";
 const BUILDING_NAME = import.meta.env.VITE_BUILDING_NAME;
 
@@ -42,6 +43,11 @@ export default function App() {
   const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   // Escáner de código QR (cámara) abierto/cerrado
   const [qrScannerOpen, setQrScannerOpen] = useState<boolean>(false);
+  // Escáner de cédula (cámara + OCR) abierto/cerrado
+  const [idScannerOpen, setIdScannerOpen] = useState<boolean>(false);
+  // Diálogo de recolección de datos faltantes antes de autorizar
+  interface Identity { auth_id: string | null; nombre?: string; cedula?: string; telefono?: string; apartment?: string; awaiting: string | null; }
+  const [identity, setIdentity] = useState<Identity | null>(null);
   const [animationState, setAnimationState] = useState<"idle" | "talking" | "scanning" | "success" | "denied">("idle");
 
   // Audio Feedback (Text-to-Speech & Speech-to-Text)
@@ -146,7 +152,7 @@ export default function App() {
       if (text) {
         setVisitorMessage(text);
         setIsTranscribing(false);
-        handleSendRequest(text); // toma el relevo del feedback con isProcessing
+        handleUserInput(text); // toma el relevo del feedback con isProcessing
         return;
       }
       // No se entendió el audio: dar feedback explícito (visual + hablado)
@@ -269,14 +275,138 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [apartmentInput]);
 
-  // Aplica una respuesta del asistente a la UI (compartida por /api/verify y /api/verify-qr)
+  // ¿Qué dato pide el backend? (cédula por cámara; el resto por voz/teclado)
+  const pickAwaiting = (data: any): string => {
+    if (data.action === "show_id_scanner") return "cedula";
+    const missing: string[] = data.missing || [];
+    return ["telefono", "apartment", "nombre", "cedula"].find((f) => missing.includes(f)) || "nombre";
+  };
+
+  // Aplica una respuesta del asistente a la UI (compartida por verify/verify-qr/identify)
   const applyAssistantResponse = (data: any) => {
     setChatHistory((prev) => [...prev, { role: "assistant", text: data.reply }]);
     setAnimationState(data.assistant_animation || "talking");
     speakText(data.reply);
     if (data.apartment) setIdentifiedApt(data.apartment);
     if (data.owner) setIdentifiedOwner(data.owner);
+
+    // Diálogo de datos faltantes: NO se ejecuta ninguna acción de hardware todavía
+    const needsInfo =
+      data.status === "NEED_INFO" || data.action === "collect_info" || data.action === "show_id_scanner";
+    if (needsInfo) {
+      const awaiting = pickAwaiting(data);
+      setIdentity((prev) => ({
+        ...(prev || { auth_id: null }),
+        auth_id: data.auth_id ?? prev?.auth_id ?? null,
+        awaiting,
+      }));
+      if (awaiting === "cedula") setIdScannerOpen(true);
+      return;
+    }
+
+    // Fin del diálogo de identidad -> ejecutar la acción del tótem
+    setIdentity(null);
+    setIdScannerOpen(false);
     handleTotemAction(data.action, data.apartment, data.owner);
+  };
+
+  // Enruta la entrada del visitante: si estamos recogiendo un dato, va a /api/identify
+  const handleUserInput = (text: string) => {
+    if (!text.trim()) return;
+    if (identity?.awaiting && identity.awaiting !== "cedula") {
+      submitIdentity(identity.awaiting, text);
+    } else {
+      handleSendRequest(text);
+    }
+  };
+
+  // Envía los datos acumulados a /api/identify (identificación + recolección)
+  const submitIdentity = async (field: string, value: string) => {
+    const next: Identity = { ...(identity || { auth_id: null }), [field]: value.trim(), awaiting: null };
+    setIdentity(next);
+    setChatHistory((prev) => [...prev, { role: "user", text: value }]);
+    setVisitorMessage("");
+    setIsProcessing(true);
+    setAnimationState("scanning");
+    try {
+      const res = await fetch("/api/identify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: next.nombre, cedula: next.cedula, telefono: next.telefono,
+          apartment: next.apartment, auth_id: next.auth_id,
+        }),
+      });
+      applyAssistantResponse(await res.json());
+    } catch (e) {
+      console.error("Identify failed:", e);
+      const msg = "Disculpe, no pude verificar sus datos en este momento. Intente de nuevo.";
+      setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
+      setAnimationState("denied");
+      speakText(msg);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Inicia la identificación de un invitado (pide el nombre por voz/teclado)
+  const handleStartGuest = () => {
+    setIdentity({ auth_id: null, awaiting: "nombre" });
+    const msg = "Con gusto. Por favor, dígame su nombre completo para verificar su autorización.";
+    setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
+    setAnimationState("talking");
+    speakText(msg);
+  };
+
+  // Resultado del IdScanner: envía la foto de la cédula a OCR y continúa la identificación
+  const handleCedulaCapture = async (blob: Blob) => {
+    setIdScannerOpen(false);
+    setIsProcessing(true);
+    setAnimationState("scanning");
+    setChatHistory((prev) => [...prev, { role: "user", text: "Cédula presentada a la cámara" }]);
+    try {
+      const fd = new FormData();
+      fd.append("file", blob, "cedula.jpg");
+      fd.append("auth_id", identity?.auth_id || "");
+      const res = await fetch("/api/verify-cedula", { method: "POST", body: fd });
+      const data = await res.json();
+
+      if (data.error || !data.cedula) {
+        const msg = "No pude leer su cédula con claridad. Por favor, muéstrela de nuevo a la cámara.";
+        setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
+        speakText(msg);
+        setAnimationState("idle");
+        setIdScannerOpen(true);
+        return;
+      }
+      if (data.match === false) {
+        const msg = "El nombre en la cédula no coincide con la autorización. Por favor, contacte al residente o al vigilante.";
+        setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
+        speakText(msg);
+        setAnimationState("denied");
+        setIdentity(null);
+        return;
+      }
+      const next: Identity = { ...(identity || { auth_id: null }), cedula: String(data.cedula), awaiting: null };
+      setIdentity(next);
+      const res2 = await fetch("/api/identify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: next.nombre, cedula: next.cedula, telefono: next.telefono,
+          apartment: next.apartment, auth_id: next.auth_id,
+        }),
+      });
+      applyAssistantResponse(await res2.json());
+    } catch (e) {
+      console.error("Cedula OCR failed:", e);
+      const msg = "Disculpe, hubo un problema al leer la cédula. Intente de nuevo.";
+      setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
+      speakText(msg);
+      setAnimationState("idle");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Main API query logic for verification
@@ -628,6 +758,12 @@ export default function App() {
                   [Escanear QR]
                 </button>
                 <button
+                  onClick={handleStartGuest}
+                  className="px-2.5 py-1 rounded-lg bg-cyan-950/20 border border-cyan-500/20 hover:border-cyan-500/50 text-cyan-400 hover:text-cyan-300 transition-all cursor-pointer font-mono text-[10px]"
+                >
+                  [Soy invitado]
+                </button>
+                <button
                   onClick={() => {
                     setApartmentInput("3A");
                     handleSendRequest("Quiero ir al apartamento 3A");
@@ -770,7 +906,7 @@ export default function App() {
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
-                  handleSendRequest(visitorMessage);
+                  handleUserInput(visitorMessage);
                 }}
                 className="flex gap-2 pt-3 border-t border-white/5 shrink-0"
               >
@@ -807,6 +943,10 @@ export default function App() {
 
       {qrScannerOpen && (
         <QrScanner onResult={handleQrResult} onClose={() => setQrScannerOpen(false)} />
+      )}
+
+      {idScannerOpen && (
+        <IdScanner onCapture={handleCedulaCapture} onClose={() => { setIdScannerOpen(false); setIdentity(null); }} />
       )}
 
     </div>

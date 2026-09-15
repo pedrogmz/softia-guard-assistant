@@ -8,11 +8,16 @@ producción, este libro mayor lo provee/ sincroniza **Soft-IA** (objetivo RF-15)
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from datetime import date
 from functools import lru_cache
 from typing import Optional
 
 from . import config
+
+# Campos del libro mayor local que se pueden actualizar tras completar datos
+_LOCAL_UPDATABLE = {"cedula", "telefono", "nombre", "email", "autorizado_hasta", "estatus", "vetado"}
 
 
 @lru_cache(maxsize=1)
@@ -32,6 +37,41 @@ def find_authorization(auth_id) -> Optional[dict]:
         if str(inv.get("id")) == str(auth_id):
             return inv
     return None
+
+
+def update_record(auth_id, fields: dict) -> bool:
+    """Actualiza un registro del libro mayor local (para reflejar datos completados
+    sin esperar la próxima sync). Devuelve True si escribió algún cambio."""
+    try:
+        with open(config.INVITATIONS_FILE, "r", encoding="utf-8") as f:
+            items = json.load(f)
+    except (FileNotFoundError, ValueError, OSError):
+        return False
+
+    updates = {k: v for k, v in fields.items() if k in _LOCAL_UPDATABLE and v not in (None, "")}
+    if not updates:
+        return False
+
+    changed = False
+    for rec in items:
+        if str(rec.get("id")) == str(auth_id):
+            rec.update(updates)
+            changed = True
+            break
+    if not changed:
+        return False
+
+    dir_ = config.INVITATIONS_FILE.parent
+    fd, tmp = tempfile.mkstemp(dir=str(dir_), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, config.INVITATIONS_FILE)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    load_invitations.cache_clear()
+    return True
 
 
 def check_state(record: dict) -> str:

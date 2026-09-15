@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, List
 
-from . import config, invitations, rag, softia
+from . import config, events, invitations, rag, softia
 
 logger = logging.getLogger("guard-backend.sync")
 
@@ -80,6 +80,7 @@ def map_autorizaciones(items: List[dict], prop_by_id: dict) -> List[dict]:
                 "autorizado_hasta": it.get("autorizado_hasta"),
                 "estatus": it.get("estatus"),
                 "vetado": it.get("flag_vetado", it.get("vetado", 0)),
+                "telefono": it.get("telefono"),
             }
         )
     return out
@@ -101,6 +102,8 @@ async def sync_once() -> dict:
     """Ejecuta una sincronización. Devuelve un resumen; nunca lanza excepción."""
     if not config.CONDOMINIO_ID:
         return {"ok": False, "error": "CONDOMINIO_ID no configurado"}
+    # Reintenta primero las visitas encoladas (RF-14, offline-first)
+    pending = await events.flush_pending()
     try:
         propietarios_raw, autorizaciones_raw = await softia.fetch_all(config.CONDOMINIO_ID)
     except Exception as exc:  # noqa: BLE001
@@ -111,7 +114,7 @@ async def sync_once() -> dict:
     autorizaciones_items = _as_list(autorizaciones_raw)
     apartments = map_propietarios(propietarios_items)
     invites = map_autorizaciones(autorizaciones_items, _index_propietarios(propietarios_items))
-    result: dict = {"ok": True}
+    result: dict = {"ok": True, "pending_visitas": pending}
 
     # Solo se sobrescribe con datos no vacíos (evita borrar el libro mayor local)
     if apartments:

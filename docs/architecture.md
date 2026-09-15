@@ -54,11 +54,31 @@ base64 con los datos de la visita, incluido el **`id` de la autorización**. Flu
    `CONDOMINIO_ID`, `idcondominios` correcto.
 4. Devuelve un `VerifyResponse` (válido → `open_gate`/`success`; no registrado/vetado/inactivo/
    vencido/otro condominio → `DENIED`/`show_error`).
+5. Si se autoriza (y `SOFTIA_ENABLED`), **registra la visita en Soft-IA** en segundo plano
+   (RF-14, `app/events.py`), sin bloquear la apertura del portón.
 
 > **Seguridad:** la decisión se toma con el libro mayor, **no** con los campos del QR (que van en
 > base64 sin firma y son falsificables). Un QR manipulado que diga "activo" se **deniega** si el
 > registro real está vetado/inactivo. En producción, ese libro mayor debe ser/consultar a
 > **Soft-IA** por `id` (RF-15, ⏳).
+
+### Recolección de datos faltantes antes de autorizar ✅
+Una autorización puede estar incompleta. La **compuerta** `app/access.py` (reutilizada por QR y voz)
+detecta los faltantes de {nombre, cédula, teléfono} y dirige un diálogo:
+1. **Identificación** — por QR (`id`) o por **nombre** (`/api/identify`, con desambiguación de
+   homónimos: primero por cédula, luego por apartamento).
+2. Si faltan datos → `GateResponse` con `status: NEED_INFO`, `missing` y `auth_id`; el frontend
+   recoge el dato y reenvía a `/api/identify` (acumulando). El **teléfono** se pide por voz/teclado;
+   la **cédula** se muestra a la cámara → `/api/verify-cedula` (OCR Tesseract, `app/ocr.py`) que
+   extrae el número y **verifica el nombre** (coincidencia difusa) contra la autorización.
+3. Con los datos completos → **PATCH a Soft-IA** (`softia.update_autorizacion`, solo campos
+   permitidos) + actualización del libro mayor local → `check_state` → APPROVED/DENIED.
+Estados/acciones nuevos: `Status.NEED_INFO`, `Action.collect_info`, `Action.show_id_scanner`;
+modelo `GateResponse` (VerifyResponse + `missing`, `auth_id`). El LLM (`/api/verify`) puede enrutar
+un invitado que se identifica por voz devolviendo `action: collect_info`.
+
+> **OCR:** la fiabilidad de Tesseract sobre cédulas reales es limitada; la verificación de nombre es
+> best-effort y admite reintento.
 
 ### `POST /api/transcribe` (STT) ✅
 Recibe un clip de audio (`multipart/form-data`) → **faster-whisper** (`vad_filter`, `beam_size=5`,
@@ -87,7 +107,9 @@ carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
 | Método | Ruta | Descripción | Estado |
 |---|---|---|---|
 | POST | `/api/verify` | Decisión de acceso (texto → JSON estructurado). | ✅ |
-| POST | `/api/verify-qr` | Valida un código QR de invitación (`{ code }` → `VerifyResponse`). | ✅ (validación local) |
+| POST | `/api/verify-qr` | Valida un código QR de invitación (`{ code }` → `GateResponse`). | ✅ |
+| POST | `/api/identify` | Identifica por nombre + recolección de datos faltantes → `GateResponse`. | ✅ |
+| POST | `/api/verify-cedula` | OCR de la cédula (imagen) → `{ cedula, match }`. | ✅ |
 | POST | `/api/transcribe` | STT: audio → `{ text }`. | ✅ |
 | GET | `/api/apartments` | Lista de apartamentos (paridad; el frontend no lo usa hoy). | ✅ |
 | POST | `/api/sync` | Fuerza la sincronización con Soft-IA (además de la periódica). | ✅ |
@@ -132,16 +154,23 @@ autorizaciones **funcionan aunque no haya conexión** a Soft-IA (offline-first, 
 
 - **`app/softia.py`** — cliente HTTP (`httpx`). Autentica con `SOFTIA_LOGIN_PATH`
   (usuario+contraseña → token) y consulta con `Authorization: Bearer <token>`:
-  `GET /api/condominio/{id}/propietarios` y `GET /api/condominio/{id}/autorizaciones`.
+  `GET /api/condominio/{id}/propietarios` y `GET /api/condominio/{id}/autorizaciones`. También
+  `POST .../visitas` (RF-14) y `PATCH .../autorizaciones/{auth}` (completar datos, RF-18).
   TLS y rutas/campos configurables por entorno.
 - **`app/sync.py`** — mapea propietarios → `apartments.json` (apt=`codigo`, owner=`nombre`) y
   autorizaciones → `invitations.json` (id=`idautorizacionvisitas`, veto=`flag_vetado`, unidad/dueño
   por cruce con propietarios vía `idpropietario`). Escribe de forma **atómica** (`os.replace`) e
   invalida las cachés. Si Soft-IA no responde o devuelve vacío, **conserva los archivos locales**.
+- **`app/events.py`** — **registro de visitas (RF-14)**: al autorizar un QR, hace
+  `POST /api/condominio/{id}/visitas` con `{idpropietario, idvisita (=idautorizacionvisitas),
+  autorizado_por, fecha, telefono}`. Se ejecuta en segundo plano (no bloquea la apertura del
+  portón). Offline-first: si falla por **red/5xx** se **encola** en `data/pending_visitas.json` y se
+  reintenta en cada sync; un **4xx** (vencida/no existe) se descarta (no se reintenta).
 - **Ejecución** — tarea en segundo plano en el ciclo de vida de FastAPI (habilitada con
-  `SOFTIA_ENABLED`), más `POST /api/sync` para forzarla. También `python -m app.sync` (CLI).
-- **Pendiente** ⏳ — registro de eventos de acceso en Soft-IA (RF-14) y verificación de token de
-  sesión propia del backend.
+  `SOFTIA_ENABLED`), más `POST /api/sync` para forzar sync + reintento de la cola. También
+  `python -m app.sync` (CLI).
+- **Pendiente** ⏳ — auditar los accesos peatonales por LLM (no tienen `idvisita`) y la verificación
+  de un token de sesión propia del backend.
 
 El resto del flujo (`/api/verify`, `/api/verify-qr`) no cambia: siguen leyendo los archivos
 locales, que ahora reflejan el estado de Soft-IA.
@@ -157,6 +186,12 @@ locales, que ahora reflejan el estado de Soft-IA.
 frame; al detectar un código llama a `/api/verify-qr` y libera la cámara. Se abre desde el botón de
 QR del tótem o automáticamente cuando `/api/verify` devuelve `action = show_qr_scanner`. Requiere
 **contexto seguro** (`localhost` o HTTPS) para acceder a la cámara. ✅
+
+**Escáner de cédula** (`frontend/src/components/IdScanner.tsx`): misma cámara que el QR, pero
+**captura un fotograma fijo** y lo envía a `/api/verify-cedula`. Se abre cuando la compuerta pide la
+cédula (`action: show_id_scanner`). El diálogo de datos faltantes vive en `App.tsx`
+(`applyAssistantResponse` maneja `NEED_INFO`; `handleUserInput`/`submitIdentity` reenvían a
+`/api/identify`; botón "Soy invitado" inicia la identificación por voz). ✅
 
 **Avatar 3D** (`frontend/src/components/VirtualAssistantCanvas.tsx`): modelo **FBX**
 (`assets/Security_Guard.fbx`) cargado con `FBXLoader`, autoescalado y encuadre de busto. Los
@@ -211,8 +246,10 @@ Arranque: `ollama serve` + `ollama pull` de los modelos → `docker compose up -
 | TTS (navegador) | ✅ | — |
 | Decisión de acceso (LLM + RAG) | ✅ | — |
 | Avatar 3D e interfaz | ✅ | — |
-| Datos de residentes y autorizaciones | ✅ sincronización Soft-IA → JSON local (offline-first) | ⏳ registro de eventos de acceso |
+| Datos de residentes y autorizaciones | ✅ sincronización Soft-IA → JSON local (offline-first) | — |
+| Registro de visitas en Soft-IA (auditoría) | ✅ visitas por QR con cola de reintento (RF-14) | ⏳ auditar accesos peatonales por LLM |
 | Escaneo y validación de QR | ✅ cámara (jsQR) + decisión con libro mayor `invitations.json` por `id` | — |
+| Recolección de datos faltantes | ✅ diálogo `NEED_INFO` (nombre/cédula/teléfono) + OCR cédula (Tesseract) + PATCH a Soft-IA | ⏳ OCR de cédulas reales robusto |
 | Portón / intercomunicador / pánico | 🟡 simulados | ⏳ hardware + Soft-IA |
 | Registro de eventos / auditoría | ⏳ | ⏳ Soft-IA |
 | Autenticación / roles | ⏳ | ⏳ |

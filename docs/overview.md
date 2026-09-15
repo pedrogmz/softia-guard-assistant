@@ -89,8 +89,12 @@ Pendiente para cumplir el objetivo completo:
   (`invitations.json`).
 - ✅ **Sincronización con Soft-IA** (offline-first): el backend alimenta `apartments.json` e
   `invitations.json` desde los endpoints de Soft-IA y opera contra los archivos locales, para
-  verificar accesos **sin conexión constante** (verificado con datos reales). Falta el registro de
-  eventos de acceso (⏳).
+  verificar accesos **sin conexión constante** (verificado con datos reales).
+- ✅ **Registro de visitas en Soft-IA** (RF-14): al autorizar un acceso por QR, la visita se
+  registra de vuelta en Soft-IA para auditoría, con cola de reintento si no hay conexión.
+- ✅ **Recolección de datos faltantes** antes de autorizar (RF-16..19): si la autorización está
+  incompleta, el asistente pide {nombre, cédula, teléfono}; la cédula se lee por cámara con **OCR
+  local (Tesseract)** verificando el nombre, y los datos se actualizan en Soft-IA (PATCH).
 - 🟡 **Acciones físicas** (portón, intercomunicador, botón de pánico) están **simuladas** en el
   frontend; falta integración con hardware real.
 - ⏳ **Validación** formal de latencia/tiempos de respuesta/usabilidad mediante simulacros.

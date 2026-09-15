@@ -57,3 +57,35 @@ async def fetch_all(condominio_id: str) -> Tuple[Any, Any]:
         auth_resp = await client.get(auth_path, headers=headers)
         auth_resp.raise_for_status()
         return prop_resp.json(), auth_resp.json()
+
+
+async def register_visita(condominio_id: str, body: dict) -> None:
+    """Registra una visita (acceso autorizado) en Soft-IA. Lanza si falla."""
+    path = config.SOFTIA_VISITAS_PATH.format(id=condominio_id)
+    async with _client() as client:
+        token = await _login(client)
+        resp = await client.post(path, json=body, headers={"Authorization": f"Bearer {token}"})
+        resp.raise_for_status()
+
+
+# Campos que Soft-IA permite actualizar en una autorización
+UPDATABLE_FIELDS = {
+    "idpropietario", "cedula", "nombre", "email", "telefono",
+    "imagen", "imagen_cedula", "estatus", "flag_vetado", "autorizado_hasta",
+}
+
+
+async def update_autorizacion(condominio_id: str, auth_id: str, fields: dict) -> None:
+    """Actualiza una autorización en Soft-IA (completar datos faltantes). Solo envía
+    los campos permitidos; nunca idautorizacionvisitas/idcondominios/creadopor/fechacreacion."""
+    body = {k: v for k, v in fields.items() if k in UPDATABLE_FIELDS}
+    if not body:
+        return
+    path = config.SOFTIA_AUTORIZACION_ITEM_PATH.format(id=condominio_id, auth=auth_id)
+    async with _client() as client:
+        token = await _login(client)
+        resp = await client.request(
+            config.SOFTIA_UPDATE_METHOD, path, json=body,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        resp.raise_for_status()

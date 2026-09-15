@@ -6,15 +6,18 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import config, invitations, llm, prompt, qr, rag, stt, sync
+from . import access, config, events, invitations, llm, ocr, prompt, qr, rag, softia, stt, sync
 from .schemas import (
     Action,
     Animation,
+    GateResponse,
+    IdentifyRequest,
     QRVerifyRequest,
     Status,
     VerifyRequest,
@@ -98,53 +101,168 @@ QR_DENY_MESSAGES = {
 }
 
 
-@app.post("/api/verify-qr", response_model=VerifyResponse)
-def verify_qr(request: QRVerifyRequest) -> VerifyResponse:
-    """Valida el QR de invitación de Soft-IA. El QR (URL con JSON en base64) aporta
-    el `id` de la autorización; la decisión se toma con el ESTADO REAL almacenado en
-    el libro mayor `invitations.json` (no con lo que traiga el QR, que es
-    falsificable). Objetivo (RF-15): que ese libro mayor sea/consulte a Soft-IA."""
+def _to_int(value):
     try:
-        payload = qr.parse_qr(request.code)
-        if not payload:
-            return _qr_denied("invalid_format")
-
-        record = invitations.find_authorization(payload.get("id"))
-        if not record:
-            return _qr_denied("not_found")
-
-        reason = invitations.check_state(record)
-        nombre = record.get("nombre") or "Visitante"
-        inmueble = record.get("inmueble")
-        propietario = record.get("propietario")
-
-        if reason == "ok":
-            return VerifyResponse(
-                reply=(
-                    f"¡Bienvenido, {nombre}! Su invitación al inmueble {inmueble} "
-                    f"(residencia de {propietario}) es válida. Abriendo el portón."
-                ),
-                apartment=inmueble,
-                status=Status.APPROVED,
-                owner=propietario,
-                action=Action.open_gate,
-                assistant_animation=Animation.success,
-            )
-        return _qr_denied(reason, apt=inmueble, owner=propietario)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Fallo en /api/verify-qr: %s", exc)
-        return ERROR_RESPONSE
+        return int(value)
+    except (TypeError, ValueError):
+        return value
 
 
-def _qr_denied(reason: str, apt: Optional[str] = None, owner: Optional[str] = None) -> VerifyResponse:
-    return VerifyResponse(
-        reply=QR_DENY_MESSAGES.get(reason, "El código QR no es válido."),
-        apartment=apt,
+# --- Compuerta de autorización (compartida por QR y voz/nombre) ------------------
+
+_NEED_INFO_PROMPTS = {
+    "cedula": "Su autorización no tiene la cédula registrada. Por favor, muestre su cédula de identidad a la cámara.",
+    "telefono": "Por favor, indíqueme un número de teléfono de contacto.",
+    "nombre": "Por favor, dígame su nombre completo.",
+    "apartment": "Hay varias autorizaciones con ese nombre. ¿A qué apartamento viene?",
+}
+
+
+def _need_info_response(record: Optional[dict], missing: list) -> GateResponse:
+    # Pide un dato a la vez, priorizando cédula (cámara) y luego teléfono.
+    order = ["cedula", "telefono", "nombre", "apartment"]
+    field = next((f for f in order if f in missing), missing[0] if missing else "")
+    action = Action.show_id_scanner if field == "cedula" else Action.collect_info
+    return GateResponse(
+        reply=_NEED_INFO_PROMPTS.get(field, "Necesito algunos datos adicionales para continuar."),
+        apartment=(record or {}).get("inmueble"),
+        status=Status.NEED_INFO,
+        owner=(record or {}).get("propietario"),
+        action=action,
+        assistant_animation=Animation.talking,
+        missing=missing,
+        auth_id=str((record or {}).get("id")) if record else None,
+    )
+
+
+def _approved_response(record: dict, background_tasks: BackgroundTasks) -> GateResponse:
+    nombre = record.get("nombre") or "Visitante"
+    inmueble = record.get("inmueble")
+    propietario = record.get("propietario")
+    # RF-14: registrar la visita en Soft-IA (en segundo plano, offline-first).
+    if config.SOFTIA_ENABLED and config.CONDOMINIO_ID:
+        visita = {
+            "idpropietario": _to_int(record.get("idpropietario")),
+            "idvisita": _to_int(record.get("id")),
+            "autorizado_por": config.SOFTIA_AUTORIZADO_POR,
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "telefono": record.get("telefono") or "",
+        }
+        background_tasks.add_task(events.register_or_queue, config.CONDOMINIO_ID, visita)
+    return GateResponse(
+        reply=(
+            f"¡Bienvenido, {nombre}! Su invitación al inmueble {inmueble} "
+            f"(residencia de {propietario}) es válida. Abriendo el portón."
+        ),
+        apartment=inmueble,
+        status=Status.APPROVED,
+        owner=propietario,
+        action=Action.open_gate,
+        assistant_animation=Animation.success,
+        auth_id=str(record.get("id")),
+    )
+
+
+def _denied_response(reason: str, record: Optional[dict] = None) -> GateResponse:
+    return GateResponse(
+        reply=QR_DENY_MESSAGES.get(reason, "Acceso denegado."),
+        apartment=(record or {}).get("inmueble"),
         status=Status.DENIED,
-        owner=owner,
+        owner=(record or {}).get("propietario"),
         action=Action.show_error,
         assistant_animation=Animation.denied,
     )
+
+
+@app.post("/api/verify-qr", response_model=GateResponse)
+async def verify_qr(request: QRVerifyRequest, background_tasks: BackgroundTasks) -> GateResponse:
+    """Valida el QR de invitación de Soft-IA. El QR aporta el `id`; la decisión se toma
+    con el estado real del libro mayor. Si faltan datos ({nombre, cédula, teléfono}),
+    devuelve NEED_INFO para completarlos antes de autorizar."""
+    try:
+        payload = qr.parse_qr(request.code)
+        if not payload:
+            return _denied_response("invalid_format")
+        record = invitations.find_authorization(payload.get("id"))
+        if not record:
+            return _denied_response("not_found")
+
+        result = access.evaluate(record)
+        if result["outcome"] == "need_info":
+            return _need_info_response(record, result["missing"])
+        if result["outcome"] == "ok":
+            return _approved_response(record, background_tasks)
+        return _denied_response(result["reason"], record)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en /api/verify-qr: %s", exc)
+        return GateResponse(**ERROR_RESPONSE.model_dump())
+
+
+@app.post("/api/identify", response_model=GateResponse)
+async def identify(request: IdentifyRequest, background_tasks: BackgroundTasks) -> GateResponse:
+    """Identificación por nombre y recolección de datos faltantes. El frontend acumula
+    los datos y reenvía; cuando están completos se actualiza Soft-IA y se decide."""
+    try:
+        # 1. Obtener la autorización (por id en curso, o resolver por nombre)
+        if request.auth_id:
+            record = invitations.find_authorization(request.auth_id)
+            if not record:
+                return _denied_response("not_found")
+        else:
+            outcome, result = access.resolve_by_name(request.nombre, request.cedula, request.apartment)
+            if outcome == "not_found":
+                return GateResponse(
+                    reply="No encontré una autorización a su nombre. Por favor, verifique con el residente o use el intercomunicador.",
+                    status=Status.DENIED, action=Action.show_error, assistant_animation=Animation.denied,
+                )
+            if outcome == "ambiguous":
+                return _need_info_response(None, ["apartment"])
+            record = result
+
+        # 2. Aplicar los datos aportados: libro mayor local (inmediato) + Soft-IA (best-effort)
+        provided = {}
+        if not access._is_empty(request.cedula):
+            provided["cedula"] = str(request.cedula).strip()
+        if not access._is_empty(request.telefono):
+            provided["telefono"] = str(request.telefono).strip()
+        if provided:
+            auth_id = str(record.get("id"))
+            invitations.update_record(auth_id, provided)
+            if config.SOFTIA_ENABLED and config.CONDOMINIO_ID:
+                try:
+                    await softia.update_autorizacion(config.CONDOMINIO_ID, auth_id, provided)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("No se pudo actualizar la autorización en Soft-IA: %s", exc)
+            record = invitations.find_authorization(auth_id) or record
+
+        # 3. Evaluar
+        result = access.evaluate(record)
+        if result["outcome"] == "need_info":
+            return _need_info_response(record, result["missing"])
+        if result["outcome"] == "ok":
+            return _approved_response(record, background_tasks)
+        return _denied_response(result["reason"], record)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en /api/identify: %s", exc)
+        return GateResponse(**ERROR_RESPONSE.model_dump())
+
+
+@app.post("/api/verify-cedula")
+async def verify_cedula(file: UploadFile = File(...), auth_id: str = Form("")) -> dict:
+    """OCR local de la cédula mostrada a la cámara. Devuelve el número detectado y si
+    el nombre reconocido coincide con la autorización (si se pasa `auth_id`)."""
+    try:
+        image_bytes = await file.read()
+        result = ocr.extract_cedula(image_bytes)
+        match = None
+        if auth_id and not result.get("error"):
+            record = invitations.find_authorization(auth_id)
+            if record and record.get("nombre"):
+                match = access.name_matches(record["nombre"], result.get("text", ""))
+        return {"cedula": result.get("cedula"), "match": match, "error": result.get("error")}
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en /api/verify-cedula: %s", exc)
+        return {"cedula": None, "match": None, "error": "ocr_failed"}
 
 
 @app.post("/api/transcribe")

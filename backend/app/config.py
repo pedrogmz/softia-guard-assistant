@@ -49,6 +49,17 @@ SOFTIA_TOKEN_FIELD: str = os.getenv("SOFTIA_TOKEN_FIELD", "token")
 SOFTIA_PROPIETARIOS_PATH: str = os.getenv("SOFTIA_PROPIETARIOS_PATH", "/api/condominio/{id}/propietarios")
 SOFTIA_AUTORIZACIONES_PATH: str = os.getenv("SOFTIA_AUTORIZACIONES_PATH", "/api/condominio/{id}/autorizaciones")
 
+# Registro de visitas (RF-14): POST del acceso autorizado de vuelta a Soft-IA.
+SOFTIA_VISITAS_PATH: str = os.getenv("SOFTIA_VISITAS_PATH", "/api/condominio/{id}/visitas")
+SOFTIA_AUTORIZADO_POR: str = os.getenv("SOFTIA_AUTORIZADO_POR", "Vigilante Virtual")
+PENDING_VISITAS_FILE: Path = DATA_DIR / "pending_visitas.json"
+
+# Actualización de una autorización (completar datos faltantes: cedula, telefono...).
+SOFTIA_AUTORIZACION_ITEM_PATH: str = os.getenv(
+    "SOFTIA_AUTORIZACION_ITEM_PATH", "/api/condominio/{id}/autorizaciones/{auth}"
+)
+SOFTIA_UPDATE_METHOD: str = os.getenv("SOFTIA_UPDATE_METHOD", "PATCH")
+
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
 PORT: int = int(os.getenv("PORT", "8000"))
 
