@@ -31,6 +31,23 @@ class IdentifyRequest(BaseModel):
     apartment: Optional[str] = None
     # Continuación del diálogo: id de la autorización ya identificada
     auth_id: Optional[str] = None
+    # Solicitud de acceso al propietario (visitante sin autorización vigente)
+    request_mode: bool = False
+    motivo: Optional[str] = None
+
+
+class AccessRequestCreate(BaseModel):
+    """Datos del visitante para solicitar autorización al propietario por WhatsApp."""
+    apartment: str
+    nombre: str
+    cedula: str
+    telefono: str
+    motivo: Optional[str] = None
+
+
+class OwnerDecision(BaseModel):
+    """Solo modo simulado: respuesta del propietario al WhatsApp."""
+    decision: str  # "aprobada" | "rechazada"
 
 
 class Status(str, Enum):
@@ -48,6 +65,7 @@ class Action(str, Enum):
     show_qr_scanner = "show_qr_scanner"
     collect_info = "collect_info"
     show_id_scanner = "show_id_scanner"
+    await_owner = "await_owner"
     none = "none"
     show_error = "show_error"
 
@@ -74,6 +92,10 @@ class GateResponse(VerifyResponse):
     datos que faltan por recoger y el id de la autorización en curso."""
     missing: List[str] = Field(default_factory=list)
     auth_id: Optional[str] = None
+    # Solicitud de acceso al propietario (WhatsApp vía Soft-IA)
+    request_mode: bool = False
+    request_id: Optional[str] = None
+    expires_in: Optional[int] = None
 
 
 # JSON Schema que se pasa a Ollama (format=...) para forzar salida estructurada.

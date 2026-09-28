@@ -9,3 +9,4 @@ faster-whisper==1.1.1
 httpx==0.28.1
 pytesseract==0.3.13
 Pillow==11.1.0
+pytest==8.3.4

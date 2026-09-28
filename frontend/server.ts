@@ -38,9 +38,9 @@ app.use("/api", async (req, res) => {
     res.send(buffer);
   } catch (error: any) {
     console.error("Backend proxy error:", error?.message || error);
-    // Para /api/verify devolvemos el shape que consume App.tsx; para el resto,
-    // un error genérico.
-    if (req.url.startsWith("/verify")) {
+    // Para las rutas que devuelven un VerifyResponse/GateResponse devolvemos el shape
+    // que consume App.tsx; para el resto, un error genérico.
+    if (["/verify", "/identify", "/access-request"].some((p) => req.url.startsWith(p))) {
       res.status(502).json({
         reply:
           "Disculpe las molestias, no puedo contactar con el sistema de seguridad en este momento. Por favor, intente de nuevo o presione el Botón de Pánico.",

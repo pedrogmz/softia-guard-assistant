@@ -13,7 +13,8 @@ import {
   HelpCircle,
   ChevronRight,
   Volume2,
-  VolumeX
+  VolumeX,
+  MessageCircle
 } from "lucide-react";
 import VirtualAssistantCanvas from "./components/VirtualAssistantCanvas";
 import QrScanner from "./components/QrScanner";
@@ -46,8 +47,14 @@ export default function App() {
   // Escáner de cédula (cámara + OCR) abierto/cerrado
   const [idScannerOpen, setIdScannerOpen] = useState<boolean>(false);
   // Diálogo de recolección de datos faltantes antes de autorizar
-  interface Identity { auth_id: string | null; nombre?: string; cedula?: string; telefono?: string; apartment?: string; awaiting: string | null; }
+  // requestMode: sin autorización vigente -> se recogen datos para pedirla al propietario (WhatsApp)
+  interface Identity { auth_id: string | null; nombre?: string; cedula?: string; telefono?: string; apartment?: string; motivo?: string; requestMode?: boolean; awaiting: string | null; }
   const [identity, setIdentity] = useState<Identity | null>(null);
+  // Espera de la respuesta del propietario a la solicitud por WhatsApp (vía Soft-IA)
+  interface OwnerWait { id: string; remaining: number; apt: string | null; owner: string | null; }
+  const [ownerWait, setOwnerWait] = useState<OwnerWait | null>(null);
+  const ownerPollRef = useRef<any>(null);
+  const ownerWaitIdRef = useRef<string | null>(null);
   const [animationState, setAnimationState] = useState<"idle" | "talking" | "scanning" | "success" | "denied">("idle");
 
   // Audio Feedback (Text-to-Speech & Speech-to-Text)
@@ -279,6 +286,8 @@ export default function App() {
   const pickAwaiting = (data: any): string => {
     if (data.action === "show_id_scanner") return "cedula";
     const missing: string[] = data.missing || [];
+    // En modo solicitud el backend ya los ordena (destino -> nombre -> cédula -> teléfono -> motivo)
+    if (data.request_mode && missing.length) return missing[0];
     return ["telefono", "apartment", "nombre", "cedula"].find((f) => missing.includes(f)) || "nombre";
   };
 
@@ -298,6 +307,7 @@ export default function App() {
       setIdentity((prev) => ({
         ...(prev || { auth_id: null }),
         auth_id: data.auth_id ?? prev?.auth_id ?? null,
+        requestMode: prev?.requestMode || !!data.request_mode,
         awaiting,
       }));
       if (awaiting === "cedula") setIdScannerOpen(true);
@@ -307,8 +317,86 @@ export default function App() {
     // Fin del diálogo de identidad -> ejecutar la acción del tótem
     setIdentity(null);
     setIdScannerOpen(false);
+    if (data.action === "await_owner" && data.request_id) {
+      startOwnerWait(data.request_id, data.expires_in, data.apartment, data.owner);
+      return;
+    }
     handleTotemAction(data.action, data.apartment, data.owner);
   };
+  // El polling llama siempre a la versión más reciente (evita closures obsoletos)
+  const applyRef = useRef(applyAssistantResponse);
+  applyRef.current = applyAssistantResponse;
+
+  const stopOwnerWait = () => {
+    clearInterval(ownerPollRef.current);
+    ownerPollRef.current = null;
+    ownerWaitIdRef.current = null;
+    setOwnerWait(null);
+  };
+
+  // Espera la respuesta del propietario: cuenta regresiva local + consulta cada 3 s
+  const startOwnerWait = (id: string, expiresIn: number | undefined, apt: string | null, owner: string | null) => {
+    stopOwnerWait();
+    ownerWaitIdRef.current = id;
+    setOwnerWait({ id, remaining: expiresIn ?? 120, apt, owner });
+    let ticks = 0;
+    let inFlight = false;
+    ownerPollRef.current = setInterval(async () => {
+      setOwnerWait((prev) => prev && { ...prev, remaining: Math.max(0, prev.remaining - 1) });
+      if (++ticks % 3 !== 0 || inFlight) return;
+      inFlight = true;
+      try {
+        const data = await (await fetch(`/api/access-request/${id}`)).json();
+        if (ownerWaitIdRef.current !== id) return; // cancelada mientras tanto
+        if (data.status === "PENDING_CONFIRMATION") {
+          if (typeof data.expires_in === "number") {
+            setOwnerWait((prev) => prev && { ...prev, remaining: data.expires_in });
+          }
+        } else {
+          stopOwnerWait();
+          applyRef.current(data);
+        }
+      } catch (e) {
+        console.warn("Access request poll failed (reintentando):", e);
+      } finally {
+        inFlight = false;
+      }
+    }, 1000);
+  };
+
+  // El visitante cancela la espera
+  const handleCancelOwnerWait = async () => {
+    const id = ownerWaitIdRef.current;
+    if (!id) return;
+    stopOwnerWait();
+    try {
+      const res = await fetch(`/api/access-request/${id}`, { method: "DELETE" });
+      applyAssistantResponse(await res.json());
+    } catch (e) {
+      console.error("Cancel access request failed:", e);
+    }
+  };
+
+  // Solo modo simulado: el propietario pulsa Aprobar/Rechazar en el WhatsApp
+  const simulateOwnerDecision = (decision: "aprobada" | "rechazada") => {
+    const id = ownerWaitIdRef.current;
+    if (!id) return;
+    fetch(`/api/dev/access-request/${id}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    }).catch((e) => console.error("Simulated owner decision failed:", e));
+  };
+
+  useEffect(() => () => clearInterval(ownerPollRef.current), []);
+
+  // Cuerpo de /api/identify con los datos acumulados (motivo: undefined = aún no preguntado)
+  const identityBody = (next: Identity) =>
+    JSON.stringify({
+      nombre: next.nombre, cedula: next.cedula, telefono: next.telefono,
+      apartment: next.apartment, auth_id: next.auth_id,
+      motivo: next.motivo, request_mode: !!next.requestMode,
+    });
 
   // Enruta la entrada del visitante: si estamos recogiendo un dato, va a /api/identify
   const handleUserInput = (text: string) => {
@@ -332,10 +420,7 @@ export default function App() {
       const res = await fetch("/api/identify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nombre: next.nombre, cedula: next.cedula, telefono: next.telefono,
-          apartment: next.apartment, auth_id: next.auth_id,
-        }),
+        body: identityBody(next),
       });
       applyAssistantResponse(await res.json());
     } catch (e) {
@@ -392,10 +477,7 @@ export default function App() {
       const res2 = await fetch("/api/identify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nombre: next.nombre, cedula: next.cedula, telefono: next.telefono,
-          apartment: next.apartment, auth_id: next.auth_id,
-        }),
+        body: identityBody(next),
       });
       applyAssistantResponse(await res2.json());
     } catch (e) {
@@ -814,6 +896,50 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {/* Espera de la respuesta del propietario (WhatsApp vía Soft-IA) */}
+              {ownerWait && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-sky-950/20 border border-sky-500/30 p-3 rounded-xl flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-3">
+                    <MessageCircle className="w-4 h-4 text-sky-400 shrink-0 animate-pulse" />
+                    <div className="flex-1">
+                      <p className="text-[9px] font-mono text-sky-400 uppercase tracking-widest font-bold">Solicitud por WhatsApp</p>
+                      <p className="text-xs text-white/80 font-medium">
+                        Esperando respuesta del residente{ownerWait.apt ? ` de ${ownerWait.apt}` : ""}…
+                      </p>
+                    </div>
+                    <span className="font-mono text-sm text-sky-300 tabular-nums">
+                      {Math.floor(ownerWait.remaining / 60)}:{String(ownerWait.remaining % 60).padStart(2, "0")}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCancelOwnerWait}
+                      className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-white/30 text-white/70 hover:text-white transition-all cursor-pointer font-mono text-[10px]"
+                    >
+                      Cancelar
+                    </button>
+                    <span className="flex-1" />
+                    <span className="font-mono text-[9px] text-white/30">Simular:</span>
+                    <button
+                      onClick={() => simulateOwnerDecision("aprobada")}
+                      className="px-2 py-1 rounded-lg bg-emerald-950/20 border border-emerald-500/20 hover:border-emerald-500/50 text-emerald-400 transition-all cursor-pointer font-mono text-[10px]"
+                    >
+                      [Aprobar]
+                    </button>
+                    <button
+                      onClick={() => simulateOwnerDecision("rechazada")}
+                      className="px-2 py-1 rounded-lg bg-rose-950/20 border border-rose-500/20 hover:border-rose-500/50 text-rose-400 transition-all cursor-pointer font-mono text-[10px]"
+                    >
+                      [Rechazar]
+                    </button>
+                  </div>
+                </motion.div>
+              )}
 
               {/* Intercom Ringing Simulation Screen */}
               {intercomCalling && (

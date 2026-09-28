@@ -60,6 +60,22 @@ SOFTIA_AUTORIZACION_ITEM_PATH: str = os.getenv(
 )
 SOFTIA_UPDATE_METHOD: str = os.getenv("SOFTIA_UPDATE_METHOD", "PATCH")
 
+# Solicitudes de acceso por WhatsApp (RF-20..23): Soft-IA envía el mensaje al propietario
+# con botones Aprobar/Rechazar y, al aprobar, crea una autorización de un día.
+# {id} = idcondominio, {sol} = idsolicitud. Contrato propuesto (ver docs/architecture.md §6).
+SOFTIA_SOLICITUDES_PATH: str = os.getenv(
+    "SOFTIA_SOLICITUDES_PATH", "/api/condominio/{id}/solicitudes-acceso"
+)
+SOFTIA_SOLICITUD_ITEM_PATH: str = os.getenv(
+    "SOFTIA_SOLICITUD_ITEM_PATH", "/api/condominio/{id}/solicitudes-acceso/{sol}"
+)
+# Simulado por defecto mientras Soft-IA no exponga el endpoint: la respuesta del
+# propietario se simula con POST /api/dev/access-request/{id}/respond.
+SOFTIA_SOLICITUD_MOCK: bool = _flag("SOFTIA_SOLICITUD_MOCK", "true")
+ACCESS_REQUEST_TIMEOUT_S: int = int(os.getenv("ACCESS_REQUEST_TIMEOUT_S", "120"))
+ACCESS_REQUEST_POLL_MIN_S: int = int(os.getenv("ACCESS_REQUEST_POLL_MIN_S", "3"))
+ACCESS_REQUESTS_FILE: Path = DATA_DIR / "access_requests.json"
+
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
 PORT: int = int(os.getenv("PORT", "8000"))
 

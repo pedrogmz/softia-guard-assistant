@@ -14,6 +14,9 @@ de entrada (STT)** se transcribe aquí con **Whisper local**, así que el audio 
 | POST | `/api/transcribe` | STT: recibe un clip de audio y devuelve `{ text }` (Whisper local) |
 | POST | `/api/identify` | Identifica por nombre + recoge datos faltantes (nombre/cédula/teléfono) → `GateResponse` |
 | POST | `/api/verify-cedula` | OCR local (Tesseract) de la cédula mostrada a la cámara → `{ cedula, match }` |
+| POST | `/api/access-request` | Solicitud de acceso al propietario por WhatsApp vía Soft-IA (visitante sin autorización) → `GateResponse` (`await_owner`) |
+| GET / DELETE | `/api/access-request/{id}` | Estado de la solicitud (polling del tótem) / cancelarla |
+| GET, POST | `/api/dev/access-requests`, `/api/dev/access-request/{id}/respond` | **Solo simulado**: lista pendientes / simula el botón Aprobar-Rechazar del propietario |
 | POST | `/api/sync` | Fuerza la sincronización con Soft-IA (propietarios/autorizaciones → JSON local) |
 | GET | `/api/apartments` | Lista los apartamentos (paridad; el frontend no lo usa) |
 | GET | `/health` | Estado y modelos configurados |
@@ -75,6 +78,25 @@ curl -s http://localhost:8000/api/verify -H 'Content-Type: application/json' \
 
 Casos representativos: `2B` → aprobado (`open_gate`); `3A` → denegado (`show_error`);
 `4B` + "traigo un código QR" → `show_qr_scanner`; `2A` + "soy repartidor" → autoriza.
+
+Tests (sin Ollama ni Soft-IA; datos aislados en un directorio temporal):
+
+```bash
+.venv/bin/python -m pytest -q
+```
+
+### Solicitud de acceso por WhatsApp (visitante sin autorización)
+
+Si el visitante no tiene autorización vigente, `/api/identify` pasa a modo solicitud
+(`request_mode`), recoge inmueble → nombre → cédula → teléfono → motivo y crea la solicitud.
+Mientras Soft-IA no exponga `solicitudes-acceso`, se usa `SOFTIA_SOLICITUD_MOCK=true` (por
+defecto): el propietario se simula con los botones del banner del tótem o con:
+
+```bash
+curl -s http://localhost:8000/api/dev/access-requests | jq        # pendientes
+curl -s -X POST http://localhost:8000/api/dev/access-request/<id>/respond \
+  -H 'Content-Type: application/json' -d '{"decision":"aprobada"}'  # o "rechazada"
+```
 
 ## Frontend
 

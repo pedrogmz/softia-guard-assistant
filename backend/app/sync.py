@@ -36,7 +36,7 @@ def _as_list(payload: Any) -> List[dict]:
 
 
 def map_propietarios(items: List[dict]) -> List[dict]:
-    """Soft-IA propietarios -> apartments.json ({apt, owner, status, notes}).
+    """Soft-IA propietarios -> apartments.json ({apt, owner, status, notes, idpropietario}).
     La unidad es `codigo` y el dueño es `nombre` (con respaldos por robustez)."""
     out: List[dict] = []
     for it in items:
@@ -44,7 +44,13 @@ def map_propietarios(items: List[dict]) -> List[dict]:
         if not apt:
             continue
         owner = it.get("nombre") or it.get("propietario") or ""
-        out.append({"apt": str(apt), "owner": owner, "status": "Disponible", "notes": ""})
+        pid = it.get("idpropietario")
+        # idpropietario dirige la solicitud de WhatsApp (Soft-IA resuelve el teléfono;
+        # los teléfonos de los residentes no se guardan en el tótem).
+        out.append({
+            "apt": str(apt), "owner": owner, "status": "Disponible", "notes": "",
+            "idpropietario": str(pid) if pid is not None else None,
+        })
     return out
 
 

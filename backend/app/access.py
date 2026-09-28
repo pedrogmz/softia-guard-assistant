@@ -10,10 +10,14 @@ import re
 import unicodedata
 from typing import List, Optional, Tuple
 
-from . import invitations
+from . import invitations, rag
 
 # Datos mínimos necesarios antes de autorizar
 REQUIRED = ("nombre", "cedula", "telefono")
+
+# Datos para una solicitud de acceso al propietario (visitante sin autorización).
+# `motivo` es opcional: se pregunta una vez (None = aún no preguntado).
+REQUEST_FIELDS = ("apartment", "nombre", "cedula", "telefono")
 
 
 def _norm(value) -> str:
@@ -69,6 +73,13 @@ def resolve_by_name(
         if by_apt:
             candidates = by_apt
 
+    # Misma persona con una autorización vencida y otra vigente (p. ej. la de un día
+    # creada al aprobar una solicitud): se usa la vigente.
+    if len(candidates) > 1:
+        valid = [r for r in candidates if invitations.check_state(r) == "ok"]
+        if len(valid) == 1:
+            candidates = valid
+
     if not candidates:
         return ("not_found", None)
     if len(candidates) == 1:
@@ -87,3 +98,33 @@ def evaluate(record: dict) -> dict:
     if reason == "ok":
         return {"outcome": "ok"}
     return {"outcome": "denied", "reason": reason}
+
+
+# --- Solicitud de acceso (visitante sin autorización vigente) --------------------
+
+# Motivos de denegación que permiten pedir autorización al propietario. Vetado y
+# otro condominio se siguen denegando sin solicitud.
+REQUESTABLE_REASONS = {"not_found", "expired", "inactivo"}
+
+
+def missing_for_request(data: dict) -> List[str]:
+    """Datos que faltan para enviar la solicitud; `motivo` al final si no se preguntó."""
+    miss = [field for field in REQUEST_FIELDS if _is_empty(data.get(field))]
+    if data.get("motivo") is None:
+        miss.append("motivo")
+    return miss
+
+
+def find_destination(text: Optional[str]) -> Optional[dict]:
+    """Inmueble destino por código ("F-1", "f 1", "PH2") o por nombre del propietario."""
+    if _is_empty(text):
+        return None
+    key = re.sub(r"[^0-9a-z]", "", _norm(text))
+    for apt in rag.load_apartments():
+        if re.sub(r"[^0-9a-z]", "", _norm(apt.get("apt"))) == key:
+            return apt
+    return rag.find_apartment(None, str(text))
+
+
+def do_not_disturb(apartment: dict) -> bool:
+    return "molestar" in _norm(apartment.get("status"))

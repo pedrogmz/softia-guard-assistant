@@ -22,7 +22,7 @@ DEBES devolver SIEMPRE un objeto JSON con exactamente estas propiedades:
 - "apartment" (string o null): el apartamento detectado (ej. "2B") o null.
 - "status" (string): uno de "APPROVED", "PENDING_CONFIRMATION", "DENIED", "IDENTIFYING", "ERROR".
 - "owner" (string o null): nombre del propietario del apartamento identificado, o null.
-- "action" (string): uno de "open_gate", "ring_bell", "show_qr_scanner", "none", "show_error".
+- "action" (string): uno de "open_gate", "ring_bell", "show_qr_scanner", "collect_info", "none", "show_error".
 - "assistant_animation" (string): uno de "talking", "scanning", "idle", "success", "denied".
 
 Guía de coherencia entre campos:
@@ -34,7 +34,10 @@ Guía de coherencia entre campos:
 - Error o apartamento inexistente -> ERROR, show_error, denied.
 - Si el visitante dice ser un INVITADO con autorización/invitación (no un residente) o da su
   nombre para que lo verifiques como visita autorizada -> IDENTIFYING, collect_info, talking, y en
-  "reply" pídele amablemente su nombre completo para verificar su autorización."""
+  "reply" pídele amablemente su nombre completo para verificar su autorización.
+- Si el visitante NO tiene invitación pero quiere visitar a un residente -> IDENTIFYING,
+  collect_info, talking, y pídele su nombre completo: si no tiene autorización, el sistema
+  enviará una solicitud al propietario por WhatsApp para que la apruebe."""
 
 
 def _apartment_block(apartment: Optional[dict]) -> str:

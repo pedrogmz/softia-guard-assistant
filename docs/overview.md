@@ -65,7 +65,7 @@ es **local y open-source**, sin dependencia de servicios en la nube.
 | Actor | Rol |
 |---|---|
 | **Visitante** | Interactúa con el tótem (voz/texto) para solicitar el acceso. |
-| **Residente** | Propietario/inquilino del apartamento; autoriza o rechaza visitas (hoy simulado; objetivo: vía intercomunicador / Soft-IA). |
+| **Residente** | Propietario/inquilino del apartamento; autoriza o rechaza visitas. Para visitantes sin autorización vigente recibe una **solicitud por WhatsApp (vía Soft-IA)** con botones Aprobar/Rechazar (RF-20…23; hoy simulado). El intercomunicador sigue simulado. |
 | **Vigilante** | Personal de seguridad; supervisa, atiende excepciones y el botón de pánico. |
 | **Administración del condominio** | Gestiona residentes, políticas y autorizaciones en **Soft-IA**. |
 | **Soft-IA** | Plataforma de gestión del condominio; fuente de verdad de residentes y autorizaciones (⏳ integración). |

@@ -80,6 +80,38 @@ un invitado que se identifica por voz devolviendo `action: collect_info`.
 > **OCR:** la fiabilidad de Tesseract sobre cédulas reales es limitada; la verificación de nombre es
 > best-effort y admite reintento.
 
+### Solicitud de acceso por WhatsApp (visitante sin autorización) 🟡
+Cuando el visitante **no tiene autorización vigente** (no existe, vencida o inactiva), el tótem no
+deniega: ofrece enviar una **solicitud al propietario** por WhatsApp **a través de Soft-IA** (RF-20…23).
+Los vetados, los de otro condominio y los inmuebles "No Molestar" se siguen denegando sin solicitud.
+
+```
+Visitante ─ nombre / [Soy invitado] ─► /api/identify
+   ├─ autorización válida ────────────► APPROVED / open_gate
+   ├─ vetado / otro condominio ───────► DENIED
+   └─ no existe / vencida / inactiva ─► NEED_INFO (request_mode=true)
+Recolección (un dato por turno): apartment → nombre → cédula (OCR) → teléfono → motivo (opcional)
+   ▼
+POST /api/access-request ─► softia.create_solicitud ─► Soft-IA ─WhatsApp─► Propietario [Aprobar][Rechazar]
+   ▼  (Soft-IA no responde → DENIED "No pude contactar al residente")
+PENDING_CONFIRMATION / await_owner {request_id, expires_in}
+Tótem: banner con cuenta regresiva + Cancelar; GET /api/access-request/{id} cada 3 s
+   ├─ aprobada  ─► upsert de la autorización de un día en invitations.json + RF-14 ─► APPROVED / open_gate
+   ├─ rechazada ─► DENIED
+   └─ expirada / cancelada ─► DENIED (+ PATCH cancelada a Soft-IA)
+```
+
+- **Privacidad:** el tótem **nunca** conoce el teléfono del propietario; envía `idpropietario`
+  (sincronizado en `apartments.json`) y Soft-IA resuelve el destinatario.
+- **Estado:** `app/access_requests.py` guarda las solicitudes en curso en
+  `data/access_requests.json` (escritura atómica) y consulta Soft-IA como máximo cada
+  `ACCESS_REQUEST_POLL_MIN_S` s; vence a los `ACCESS_REQUEST_TIMEOUT_S` s (120 por defecto).
+- **Sin cola:** si Soft-IA no está disponible al crear la solicitud, se deniega; una solicitud que
+  llega tarde no sirve (a diferencia de RF-14).
+- **Modo simulado** (`SOFTIA_SOLICITUD_MOCK=true`): no se llama a Soft-IA; el botón del propietario se
+  simula con `POST /api/dev/access-request/{id}/respond {"decision": "aprobada"|"rechazada"}`, que
+  construye localmente la autorización de un día.
+
 ### `POST /api/transcribe` (STT) ✅
 Recibe un clip de audio (`multipart/form-data`) → **faster-whisper** (`vad_filter`, `beam_size=5`,
 carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
@@ -112,6 +144,10 @@ carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
 | POST | `/api/verify-cedula` | OCR de la cédula (imagen) → `{ cedula, match }`. | ✅ |
 | POST | `/api/transcribe` | STT: audio → `{ text }`. | ✅ |
 | GET | `/api/apartments` | Lista de apartamentos (paridad; el frontend no lo usa hoy). | ✅ |
+| POST | `/api/access-request` | Crea una solicitud de acceso (WhatsApp vía Soft-IA) con los datos recogidos → `GateResponse` (`await_owner`). | 🟡 |
+| GET | `/api/access-request/{id}` | Estado de la solicitud (polling) → `GateResponse` (pendiente / aprobada / rechazada / expirada). | 🟡 |
+| DELETE | `/api/access-request/{id}` | El visitante cancela la espera. | 🟡 |
+| POST | `/api/dev/access-request/{id}/respond` | **Solo modo simulado**: simula el botón Aprobar/Rechazar del propietario. | 🟡 |
 | POST | `/api/sync` | Fuerza la sincronización con Soft-IA (además de la periódica). | ✅ |
 | GET | `/health` | Estado y modelos configurados. | ✅ |
 
@@ -120,10 +156,14 @@ carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
 
 **`VerifyResponse`**: `{ reply, apartment?, status, owner?, action, assistant_animation }`.
 
+**`GateResponse`**: `VerifyResponse` + `{ missing?, auth_id?, request_mode?, request_id?, expires_in? }`.
+`IdentifyRequest` acepta además `motivo` y `request_mode`; `AccessRequestCreate` =
+`{ apartment, nombre, cedula, telefono, motivo? }`.
+
 | Enum | Valores |
 |---|---|
-| `status` | `APPROVED` · `PENDING_CONFIRMATION` · `DENIED` · `IDENTIFYING` · `ERROR` |
-| `action` | `open_gate` · `ring_bell` · `show_qr_scanner` · `none` · `show_error` |
+| `status` | `APPROVED` · `PENDING_CONFIRMATION` · `DENIED` · `IDENTIFYING` · `NEED_INFO` · `ERROR` |
+| `action` | `open_gate` · `ring_bell` · `show_qr_scanner` · `collect_info` · `show_id_scanner` · `await_owner` · `none` · `show_error` |
 | `assistant_animation` | `talking` · `scanning` · `idle` · `success` · `denied` |
 
 **Proxy**: el frontend llama a `/api/*` (mismo origen); `frontend/server.ts` reenvía en *streaming*
@@ -132,7 +172,8 @@ Node resuelve a IPv6 mientras uvicorn escucha en IPv4).
 
 ## 5. Modelo de datos y RAG
 
-- **`backend/data/apartments.json`** — propietarios/residentes, campos `{ apt, owner, status, notes }`.
+- **`backend/data/apartments.json`** — propietarios/residentes, campos `{ apt, owner, status, notes, idpropietario }`
+  (`idpropietario` permite dirigir la solicitud de WhatsApp; **no** se sincronizan teléfonos).
   Se **alimenta desde Soft-IA** (endpoint de propietarios; apt=`codigo`, owner=`nombre`). ✅
 - **`backend/data/invitations.json`** — **libro mayor de autorizaciones** del condominio: el
   estado real de cada invitación (`id`, `nombre`, `inmueble`, `propietario`, `idcondominios`,
@@ -166,6 +207,13 @@ autorizaciones **funcionan aunque no haya conexión** a Soft-IA (offline-first, 
   autorizado_por, fecha, telefono}`. Se ejecuta en segundo plano (no bloquea la apertura del
   portón). Offline-first: si falla por **red/5xx** se **encola** en `data/pending_visitas.json` y se
   reintenta en cada sync; un **4xx** (vencida/no existe) se descarta (no se reintenta).
+- **Solicitudes de acceso (RF-21)** ⏳ — contrato **propuesto** a Soft-IA:
+  `POST /api/condominio/{id}/solicitudes-acceso` `{idpropietario, inmueble, nombre, cedula, telefono,
+  motivo, expira_en}` → `{idsolicitud, estatus}`; `GET …/{sol}` → `{estatus, autorizacion?}`;
+  `PATCH …/{sol}` `{estatus:"cancelada"}`. Soft-IA envía el WhatsApp (bot `bas_whatsapp_*`, plantilla
+  con botones) y, al aprobar, crea la autorización de un día en `bas_autorizacionvisitas`, que el
+  tótem copia al libro mayor local. Rutas configurables (`SOFTIA_SOLICITUDES_PATH`,
+  `SOFTIA_SOLICITUD_ITEM_PATH`). Hoy simulado (`SOFTIA_SOLICITUD_MOCK=true`).
 - **Ejecución** — tarea en segundo plano en el ciclo de vida de FastAPI (habilitada con
   `SOFTIA_ENABLED`), más `POST /api/sync` para forzar sync + reintento de la cola. También
   `python -m app.sync` (CLI).
@@ -192,6 +240,11 @@ QR del tótem o automáticamente cuando `/api/verify` devuelve `action = show_qr
 cédula (`action: show_id_scanner`). El diálogo de datos faltantes vive en `App.tsx`
 (`applyAssistantResponse` maneja `NEED_INFO`; `handleUserInput`/`submitIdentity` reenvían a
 `/api/identify`; botón "Soy invitado" inicia la identificación por voz). ✅
+
+**Espera de la respuesta del propietario** (`action: await_owner`): banner "Esperando respuesta del
+residente…" con **cuenta regresiva** y botón **Cancelar**; el frontend consulta
+`GET /api/access-request/{id}` cada 3 s y aplica la respuesta final (abre el portón o deniega, con
+voz). 🟡
 
 **Avatar 3D** (`frontend/src/components/VirtualAssistantCanvas.tsx`): modelo **FBX**
 (`assets/Security_Guard.fbx`) cargado con `FBXLoader`, autoescalado y encuadre de busto. Los
@@ -250,6 +303,7 @@ Arranque: `ollama serve` + `ollama pull` de los modelos → `docker compose up -
 | Registro de visitas en Soft-IA (auditoría) | ✅ visitas por QR con cola de reintento (RF-14) | ⏳ auditar accesos peatonales por LLM |
 | Escaneo y validación de QR | ✅ cámara (jsQR) + decisión con libro mayor `invitations.json` por `id` | — |
 | Recolección de datos faltantes | ✅ diálogo `NEED_INFO` (nombre/cédula/teléfono) + OCR cédula (Tesseract) + PATCH a Soft-IA | ⏳ OCR de cédulas reales robusto |
+| Solicitud de acceso por WhatsApp | 🟡 flujo completo con canal simulado (`SOFTIA_SOLICITUD_MOCK`) | ⏳ endpoint `solicitudes-acceso` + bot de WhatsApp en Soft-IA |
 | Portón / intercomunicador / pánico | 🟡 simulados | ⏳ hardware + Soft-IA |
 | Registro de eventos / auditoría | ⏳ | ⏳ Soft-IA |
 | Autenticación / roles | ⏳ | ⏳ |

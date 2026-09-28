@@ -13,6 +13,8 @@ chroma_db/
 
 # Cola transitoria de visitas pendientes de registrar en Soft-IA (RF-14)
 data/pending_visitas.json
+# Solicitudes de acceso en curso (WhatsApp vía Soft-IA)
+data/access_requests.json
 
 # Node (backend Node antiguo, ya obsoleto)
 node_modules/

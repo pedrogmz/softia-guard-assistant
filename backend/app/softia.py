@@ -89,3 +89,39 @@ async def update_autorizacion(condominio_id: str, auth_id: str, fields: dict) ->
             headers={"Authorization": f"Bearer {token}"},
         )
         resp.raise_for_status()
+
+
+# --- Solicitudes de acceso por WhatsApp (RF-20..23) -----------------------------
+# Soft-IA resuelve el teléfono del propietario por idpropietario/inmueble: el tótem
+# nunca lo conoce. Al aprobar, Soft-IA crea la autorización de un día y la devuelve.
+
+async def create_solicitud(condominio_id: str, body: dict) -> dict:
+    """Crea la solicitud y dispara el WhatsApp al propietario. Devuelve
+    {idsolicitud, estatus}. Lanza si falla."""
+    path = config.SOFTIA_SOLICITUDES_PATH.format(id=condominio_id)
+    async with _client() as client:
+        token = await _login(client)
+        resp = await client.post(path, json=body, headers={"Authorization": f"Bearer {token}"})
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def get_solicitud(condominio_id: str, sol_id: str) -> dict:
+    """Estado de la solicitud: {estatus, autorizacion?}. Lanza si falla."""
+    path = config.SOFTIA_SOLICITUD_ITEM_PATH.format(id=condominio_id, sol=sol_id)
+    async with _client() as client:
+        token = await _login(client)
+        resp = await client.get(path, headers={"Authorization": f"Bearer {token}"})
+        resp.raise_for_status()
+        return resp.json()
+
+
+async def cancel_solicitud(condominio_id: str, sol_id: str) -> None:
+    """Marca la solicitud como cancelada (vencida o cancelada por el visitante)."""
+    path = config.SOFTIA_SOLICITUD_ITEM_PATH.format(id=condominio_id, sol=sol_id)
+    async with _client() as client:
+        token = await _login(client)
+        resp = await client.patch(
+            path, json={"estatus": "cancelada"}, headers={"Authorization": f"Bearer {token}"}
+        )
+        resp.raise_for_status()

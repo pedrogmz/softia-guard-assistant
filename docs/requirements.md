@@ -36,6 +36,10 @@ este diagnóstico se derivan los requerimientos siguientes.
 | RF-17 | Leer la **cédula mostrada a la cámara** (OCR local Tesseract) y **verificar** que el nombre coincide con la autorización. | ✅ (fiabilidad de OCR limitada; best-effort con reintento) |
 | RF-18 | **Actualizar la autorización** en Soft-IA (PATCH `cedula`/`telefono`) con los datos recogidos, y reflejarlo en el libro mayor local. | ✅ (requiere `SOFTIA_ENABLED=true`) |
 | RF-19 | **Identificar por nombre** una autorización y **desambiguar** homónimos (por cédula, luego apartamento). | ✅ |
+| RF-20 | **Solicitud de acceso** para visitantes **sin autorización vigente** (inexistente, vencida o inactiva): en lugar de denegar, recoger {inmueble destino, nombre, cédula, teléfono, motivo opcional} y generar una solicitud. Los **vetados** y de **otro condominio** se siguen denegando sin solicitud; los inmuebles con política "No Molestar" también. | 🟡 (flujo completo; canal Soft-IA simulado con `SOFTIA_SOLICITUD_MOCK=true`) |
+| RF-21 | **Notificar al propietario por WhatsApp vía Soft-IA** con los datos del visitante y botones **Aprobar / Rechazar**. El tótem nunca conoce el teléfono del propietario (Soft-IA lo resuelve por `idpropietario`). | ⏳ (contrato propuesto en §6; hoy simulado) |
+| RF-22 | **Espera con tiempo límite**: el visitante ve una cuenta regresiva (por defecto 120 s, `ACCESS_REQUEST_TIMEOUT_S`) y puede **cancelar**; si el propietario rechaza o no responde, se deniega con un mensaje amable. | 🟡 (simulado) |
+| RF-23 | Al **aprobar**, se crea una **autorización de un día** (`autorizado_hasta` = hoy 23:59) en Soft-IA, se copia al libro mayor local, se registra la visita (RF-14) y se abre el portón. Si el visitante vuelve ese día, entra directo por nombre. | 🟡 (simulado) |
 
 > Nota: el acceso **vehicular** se limita a RF-10 (control de portón). No se contempla
 > reconocimiento automático de placas (ANPR/LPR) — ver alcance en [overview.md](overview.md#alcance).
@@ -44,7 +48,7 @@ este diagnóstico se derivan los requerimientos siguientes.
 
 | ID | Requerimiento | Estado |
 |---|---|---|
-| RNF-01 | **Local / offline**: todo el procesamiento de IA corre localmente, sin servicios en la nube. | ✅ |
+| RNF-01 | **Local / offline**: todo el procesamiento de IA corre localmente, sin servicios en la nube. **Excepción explícita**: la solicitud de acceso (RF-21) viaja por WhatsApp, un servicio externo, **a través de Soft-IA**; la decisión de IA sigue siendo local y, sin conexión, el tótem no puede contactar al residente (degrada a denegación). | ✅ |
 | RNF-02 | **Privacidad**: el audio del visitante se procesa localmente y no se envía a terceros. | ✅ |
 | RNF-03 | **Latencia y tiempos de respuesta** dentro de objetivos medibles (ver §7). | ⏳ (a validar) |
 | RNF-04 | **Usabilidad**: interacción natural por voz con retroalimentación continua en cada fase. | ✅ / a validar |
@@ -93,6 +97,7 @@ los datos a archivos locales y opera contra ellos, para no depender de conexión
 | **Sincronizar autorizaciones** | `GET /api/condominio/{id}/autorizaciones` → `invitations.json` (id=`idautorizacionvisitas`, veto=`flag_vetado`, unidad/dueño por cruce con propietarios). | ✅ |
 | **Autenticación** | Login (usuario+contraseña → token) y `Bearer` en cada consulta. | ✅ |
 | **Registrar visita** | `POST /api/condominio/{id}/visitas` con `{idpropietario, idvisita, autorizado_por, fecha, telefono}` al autorizar un QR; encola y reintenta si falla por red. | ✅ |
+| **Solicitud de acceso (WhatsApp)** | `POST /api/condominio/{id}/solicitudes-acceso` con `{idpropietario, inmueble, nombre, cedula, telefono, motivo, expira_en}` → `{idsolicitud, estatus}`; `GET …/{sol}` → `{estatus: pendiente\|aprobada\|rechazada\|expirada\|cancelada, autorizacion?}`; `PATCH …/{sol}` `{estatus:"cancelada"}`. Soft-IA envía el WhatsApp y, al aprobar, **crea la autorización de un día**. **No se encola**: una solicitud que llega tarde no sirve. | ⏳ (contrato propuesto; simulado con `SOFTIA_SOLICITUD_MOCK=true`) |
 
 Implementado y verificado con datos reales: cliente `app/softia.py` + sincronización periódica
 `app/sync.py` (tarea en el ciclo de vida de FastAPI + `POST /api/sync` + CLI `python -m app.sync`) +
@@ -125,4 +130,5 @@ Validación mediante **simulacros de acceso controlados**, midiendo:
 | **Restos del backend Gemini** | Referencias obsoletas en `frontend/metadata.json` y comentarios; rotar/eliminar `GEMINI_API_KEY` heredada. |
 | **Registro de accesos no-QR** | Se registran las visitas autorizadas por QR (con `idvisita`). Los accesos peatonales por LLM no tienen `idvisita`, así que aún no se auditan en Soft-IA (requeriría otro endpoint/estructura). |
 | **Refresco del índice RAG tras sync** | `find_apartment` lee `apartments.json` fresco, pero los documentos de apartamentos en ChromaDB quedan del estado anterior hasta re-ejecutar `python -m app.ingest`. |
+| **Endpoint de solicitudes en Soft-IA** | El contrato de `solicitudes-acceso` (§6) es una **propuesta**: Soft-IA debe exponerlo y conectar su bot de WhatsApp (`bas_whatsapp_*`, plantilla con botones). Hasta entonces se usa `SOFTIA_SOLICITUD_MOCK=true` y `POST /api/dev/access-request/{id}/respond` simula el botón del propietario. |
 | **Acciones físicas simuladas** | Portón, intercomunicador y pánico usan `setTimeout`; requieren integración con hardware/Soft-IA. |

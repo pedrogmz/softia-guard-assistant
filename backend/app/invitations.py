@@ -60,8 +60,27 @@ def update_record(auth_id, fields: dict) -> bool:
             break
     if not changed:
         return False
+    _write(items)
+    return True
 
+
+def upsert_record(record: dict) -> None:
+    """Inserta (o reemplaza por `id`) una autorización en el libro mayor local, p. ej.
+    la autorización de un día creada al aprobar una solicitud de acceso."""
+    try:
+        with open(config.INVITATIONS_FILE, "r", encoding="utf-8") as f:
+            items = json.load(f)
+    except (FileNotFoundError, ValueError, OSError):
+        items = []
+    items = [r for r in items if str(r.get("id")) != str(record.get("id"))]
+    items.append(record)
+    _write(items)
+
+
+def _write(items: list) -> None:
+    """Escritura atómica del libro mayor + invalidación de la caché."""
     dir_ = config.INVITATIONS_FILE.parent
+    dir_.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(dir_), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -71,7 +90,6 @@ def update_record(auth_id, fields: dict) -> bool:
         if os.path.exists(tmp):
             os.remove(tmp)
     load_invitations.cache_clear()
-    return True
 
 
 def check_state(record: dict) -> str:
@@ -86,7 +104,7 @@ def check_state(record: dict) -> str:
     autorizado_hasta = record.get("autorizado_hasta")
     if autorizado_hasta:
         try:
-            if date.today() > date.fromisoformat(str(autorizado_hasta)):
+            if date.today() > date.fromisoformat(str(autorizado_hasta)[:10]):
                 return "expired"
         except ValueError:
             pass  # fecha mal formada: se ignora la comprobación de vigencia

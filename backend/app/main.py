@@ -9,15 +9,17 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import access, config, events, invitations, llm, ocr, prompt, qr, rag, softia, stt, sync
+from . import access, access_requests, config, events, invitations, llm, ocr, prompt, qr, rag, softia, stt, sync
 from .schemas import (
+    AccessRequestCreate,
     Action,
     Animation,
     GateResponse,
     IdentifyRequest,
+    OwnerDecision,
     QRVerifyRequest,
     Status,
     VerifyRequest,
@@ -98,6 +100,13 @@ QR_DENY_MESSAGES = {
     "vetado": "Lo siento, el acceso de este visitante está restringido. Por favor, contacte a la administración.",
     "inactivo": "Esta invitación no se encuentra activa. Por favor, contacte al residente.",
     "expired": "Su autorización de visita ha vencido. Por favor, solicite una nueva al residente.",
+    # Solicitud de acceso al propietario (WhatsApp vía Soft-IA)
+    "owner_rejected": "Lo siento, el residente no autorizó su visita.",
+    "owner_no_answer": "El residente no respondió a tiempo. Puede intentarlo más tarde o comunicarse directamente con él.",
+    "request_cancelled": "Solicitud cancelada. Que tenga un buen día.",
+    "owner_unreachable": "En este momento no puedo contactar al residente. Por favor, intente más tarde o comuníquese directamente con él.",
+    "do_not_disturb": "El residente de ese inmueble pidió no ser molestado. No puedo enviarle solicitudes en este momento.",
+    "request_not_found": "No encontré esa solicitud de acceso. Por favor, inicie de nuevo.",
 }
 
 
@@ -118,13 +127,29 @@ _NEED_INFO_PROMPTS = {
 }
 
 
-def _need_info_response(record: Optional[dict], missing: list) -> GateResponse:
+# Prompts del modo solicitud (visitante sin autorización): el inmueble es el destino
+_REQUEST_PROMPTS = {
+    **_NEED_INFO_PROMPTS,
+    "apartment": "¿A qué inmueble se dirige? Dígame el número del inmueble o el nombre del propietario.",
+    "motivo": "¿Cuál es el motivo de su visita? Si prefiere no indicarlo, diga «ninguno».",
+}
+
+
+def _need_info_response(
+    record: Optional[dict], missing: list, request_mode: bool = False, prefix: str = ""
+) -> GateResponse:
     # Pide un dato a la vez, priorizando cédula (cámara) y luego teléfono.
-    order = ["cedula", "telefono", "nombre", "apartment"]
+    # En modo solicitud primero el destino, y el motivo al final.
+    order = (
+        ["apartment", "nombre", "cedula", "telefono", "motivo"] if request_mode
+        else ["cedula", "telefono", "nombre", "apartment"]
+    )
+    prompts = _REQUEST_PROMPTS if request_mode else _NEED_INFO_PROMPTS
     field = next((f for f in order if f in missing), missing[0] if missing else "")
     action = Action.show_id_scanner if field == "cedula" else Action.collect_info
+    reply = prompts.get(field, "Necesito algunos datos adicionales para continuar.")
     return GateResponse(
-        reply=_NEED_INFO_PROMPTS.get(field, "Necesito algunos datos adicionales para continuar."),
+        reply=f"{prefix} {reply}".strip(),
         apartment=(record or {}).get("inmueble"),
         status=Status.NEED_INFO,
         owner=(record or {}).get("propietario"),
@@ -132,15 +157,19 @@ def _need_info_response(record: Optional[dict], missing: list) -> GateResponse:
         assistant_animation=Animation.talking,
         missing=missing,
         auth_id=str((record or {}).get("id")) if record else None,
+        request_mode=request_mode,
     )
 
 
-def _approved_response(record: dict, background_tasks: BackgroundTasks) -> GateResponse:
+def _approved_response(
+    record: dict, background_tasks: BackgroundTasks,
+    reply: Optional[str] = None, register: bool = True,
+) -> GateResponse:
     nombre = record.get("nombre") or "Visitante"
     inmueble = record.get("inmueble")
     propietario = record.get("propietario")
     # RF-14: registrar la visita en Soft-IA (en segundo plano, offline-first).
-    if config.SOFTIA_ENABLED and config.CONDOMINIO_ID:
+    if register and config.SOFTIA_ENABLED and config.CONDOMINIO_ID:
         visita = {
             "idpropietario": _to_int(record.get("idpropietario")),
             "idvisita": _to_int(record.get("id")),
@@ -150,7 +179,7 @@ def _approved_response(record: dict, background_tasks: BackgroundTasks) -> GateR
         }
         background_tasks.add_task(events.register_or_queue, config.CONDOMINIO_ID, visita)
     return GateResponse(
-        reply=(
+        reply=reply or (
             f"¡Bienvenido, {nombre}! Su invitación al inmueble {inmueble} "
             f"(residencia de {propietario}) es válida. Abriendo el portón."
         ),
@@ -203,6 +232,10 @@ async def identify(request: IdentifyRequest, background_tasks: BackgroundTasks) 
     """Identificación por nombre y recolección de datos faltantes. El frontend acumula
     los datos y reenvía; cuando están completos se actualiza Soft-IA y se decide."""
     try:
+        # 0. Modo solicitud: recoger datos para pedir autorización al propietario
+        if request.request_mode:
+            return await _request_step(request)
+
         # 1. Obtener la autorización (por id en curso, o resolver por nombre)
         if request.auth_id:
             record = invitations.find_authorization(request.auth_id)
@@ -211,9 +244,10 @@ async def identify(request: IdentifyRequest, background_tasks: BackgroundTasks) 
         else:
             outcome, result = access.resolve_by_name(request.nombre, request.cedula, request.apartment)
             if outcome == "not_found":
-                return GateResponse(
-                    reply="No encontré una autorización a su nombre. Por favor, verifique con el residente o use el intercomunicador.",
-                    status=Status.DENIED, action=Action.show_error, assistant_animation=Animation.denied,
+                # Sin autorización: ofrecer la solicitud al propietario (RF-20)
+                return await _request_step(
+                    request, prefix="No encontré una autorización a su nombre. "
+                    "Puedo enviar una solicitud al propietario por WhatsApp.",
                 )
             if outcome == "ambiguous":
                 return _need_info_response(None, ["apartment"])
@@ -241,10 +275,160 @@ async def identify(request: IdentifyRequest, background_tasks: BackgroundTasks) 
             return _need_info_response(record, result["missing"])
         if result["outcome"] == "ok":
             return _approved_response(record, background_tasks)
+        if result["reason"] in access.REQUESTABLE_REASONS:
+            # Vencida / inactiva: ofrecer una nueva solicitud reutilizando sus datos
+            reason = "ha vencido" if result["reason"] == "expired" else "no está activa"
+            return await _request_step(
+                request.model_copy(update={"auth_id": str(record.get("id"))}),
+                prefix=f"Su autorización {reason}. Puedo enviar una solicitud al propietario por WhatsApp.",
+            )
         return _denied_response(result["reason"], record)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Fallo en /api/identify: %s", exc)
         return GateResponse(**ERROR_RESPONSE.model_dump())
+
+
+# --- Solicitud de acceso al propietario por WhatsApp, vía Soft-IA (RF-20..23) ---------
+
+async def _request_step(request: IdentifyRequest, prefix: str = "") -> GateResponse:
+    """Un paso del diálogo de solicitud: pide el siguiente dato o, si están todos,
+    crea la solicitud. Si hay una autorización previa (vencida/inactiva) reutiliza
+    sus datos."""
+    record = invitations.find_authorization(request.auth_id) if request.auth_id else None
+    base = record or {}
+    data = {
+        "apartment": request.apartment or base.get("inmueble"),
+        "nombre": request.nombre or base.get("nombre"),
+        "cedula": request.cedula or base.get("cedula"),
+        "telefono": request.telefono or base.get("telefono"),
+        "motivo": request.motivo,
+    }
+    if data["motivo"] is not None and access._norm(data["motivo"]).strip(" .") in ("ninguno", "ninguna", "no"):
+        data["motivo"] = ""
+    missing = access.missing_for_request(data)
+    apartment = None
+    if "apartment" not in missing:
+        apartment = access.find_destination(data["apartment"])
+        if not apartment:
+            missing.insert(0, "apartment")
+            prefix = (prefix + f" No encontré el inmueble «{data['apartment']}».").strip()
+    if missing:
+        resp = _need_info_response(record, missing, request_mode=True, prefix=prefix)
+        if apartment:
+            resp.apartment, resp.owner = apartment.get("apt"), apartment.get("owner")
+        return resp
+    return await _create_access_request(data, apartment)
+
+
+async def _create_access_request(data: dict, apartment: dict) -> GateResponse:
+    if access.do_not_disturb(apartment):
+        return _denied_response("do_not_disturb", {"inmueble": apartment.get("apt")})
+    try:
+        req = await access_requests.create(data, apartment)
+    except Exception as exc:  # noqa: BLE001 - sin cola: una solicitud tardía no sirve
+        logger.warning("No se pudo crear la solicitud de acceso en Soft-IA: %s", exc)
+        return _denied_response("owner_unreachable", {"inmueble": apartment.get("apt")})
+    return _pending_response(
+        req,
+        f"Listo. Envié su solicitud al propietario del inmueble {req['inmueble']} por WhatsApp. "
+        "Por favor, espere unos momentos su respuesta.",
+    )
+
+
+def _pending_response(req: dict, reply: str) -> GateResponse:
+    return GateResponse(
+        reply=reply,
+        apartment=req.get("inmueble"),
+        status=Status.PENDING_CONFIRMATION,
+        owner=req.get("propietario"),
+        action=Action.await_owner,
+        assistant_animation=Animation.scanning,
+        request_mode=True,
+        request_id=req["id"],
+        expires_in=access_requests.expires_in(req),
+    )
+
+
+def _request_outcome(req: Optional[dict], background_tasks: BackgroundTasks) -> GateResponse:
+    """Traduce el estado de la solicitud a la respuesta del tótem."""
+    if not req:
+        return _denied_response("request_not_found")
+    estatus = req["estatus"]
+    info = {"inmueble": req.get("inmueble"), "propietario": req.get("propietario")}
+    if estatus == access_requests.APROBADA:
+        record = req["autorizacion"]
+        first = not req.get("entregada")
+        if first:
+            # Libro mayor local: si vuelve hoy, entra directo por nombre
+            invitations.upsert_record(record)
+            access_requests.mark_delivered(req)
+        nombre = record.get("nombre") or "Visitante"
+        return _approved_response(
+            record, background_tasks,
+            reply=f"¡El residente aprobó su visita, {nombre}! Abriendo el portón.",
+            # RF-14 una sola vez; la autorización simulada no existe en Soft-IA
+            register=first and not str(record.get("id", "")).startswith("mock-"),
+        )
+    if estatus == access_requests.RECHAZADA:
+        return _denied_response("owner_rejected", info)
+    if estatus == access_requests.EXPIRADA:
+        return _denied_response("owner_no_answer", info)
+    if estatus == access_requests.CANCELADA:
+        return _denied_response("request_cancelled", info)
+    return _pending_response(req, "Esperando la respuesta del residente.")
+
+
+@app.post("/api/access-request", response_model=GateResponse)
+async def create_access_request(request: AccessRequestCreate) -> GateResponse:
+    """Crea una solicitud de acceso con los datos ya recogidos (Soft-IA envía el WhatsApp)."""
+    try:
+        data = request.model_dump()
+        data["motivo"] = data.get("motivo") or ""  # opcional en la API directa
+        return await _request_step(IdentifyRequest(**data, request_mode=True))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en POST /api/access-request: %s", exc)
+        return GateResponse(**ERROR_RESPONSE.model_dump())
+
+
+@app.get("/api/access-request/{request_id}", response_model=GateResponse)
+async def access_request_status(request_id: str, background_tasks: BackgroundTasks) -> GateResponse:
+    """Polling del tótem mientras el visitante espera la respuesta del propietario."""
+    try:
+        return _request_outcome(await access_requests.refresh(request_id), background_tasks)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en GET /api/access-request: %s", exc)
+        return GateResponse(**ERROR_RESPONSE.model_dump())
+
+
+@app.delete("/api/access-request/{request_id}", response_model=GateResponse)
+async def cancel_access_request(request_id: str, background_tasks: BackgroundTasks) -> GateResponse:
+    """El visitante cancela la espera."""
+    try:
+        return _request_outcome(await access_requests.cancel(request_id), background_tasks)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Fallo en DELETE /api/access-request: %s", exc)
+        return GateResponse(**ERROR_RESPONSE.model_dump())
+
+
+@app.get("/api/dev/access-requests")
+def dev_pending_requests() -> list:
+    """Solo modo simulado: solicitudes pendientes (para simular al propietario)."""
+    if not access_requests.is_mock():
+        raise HTTPException(status_code=404)
+    return access_requests.list_pending()
+
+
+@app.post("/api/dev/access-request/{request_id}/respond")
+def dev_owner_responds(request_id: str, body: OwnerDecision) -> dict:
+    """Solo modo simulado: el propietario pulsa Aprobar/Rechazar en el WhatsApp."""
+    if not access_requests.is_mock():
+        raise HTTPException(status_code=404)
+    if body.decision not in (access_requests.APROBADA, access_requests.RECHAZADA):
+        raise HTTPException(status_code=422, detail="decision: aprobada | rechazada")
+    req = access_requests.resolve_mock(request_id, body.decision)
+    if not req:
+        raise HTTPException(status_code=404)
+    return {"id": req["id"], "estatus": req["estatus"]}
 
 
 @app.post("/api/verify-cedula")
