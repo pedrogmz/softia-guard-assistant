@@ -52,7 +52,7 @@ es **local y open-source**, sin dependencia de servicios en la nube.
   portón** por decisión del asistente/vigilante.
 - Integración con **Soft-IA** vía API REST (consulta de residentes/autorizaciones y registro de
   eventos de acceso).
-- Interfaz del tótem con **avatar 3D**, retroalimentación por voz y estados visuales.
+- Interfaz del tótem con el **Vigilante como personaje**, retroalimentación por voz y estados visuales.
 
 **Fuera del alcance:**
 - **Reconocimiento automático de placas (ANPR/LPR)**. El acceso vehicular se limita al control
@@ -78,7 +78,7 @@ Existe un **prototipo funcional** end-to-end:
 - ✅ Identificación de apartamento/residente y decisión de acceso con **LLM local (Ollama) + RAG
   (ChromaDB)** sobre las políticas del condominio.
 - ✅ Respuesta estructurada que dirige el tótem (estado de acceso, acción y animación del avatar).
-- ✅ Avatar 3D del vigilante e interfaz del tótem.
+- ✅ Interfaz del tótem «Videoportero Soft-IA» (horizontal y vertical, día/noche), con el Vigilante como personaje.
 - ✅ Despliegue con Docker (frontend + backend) y Ollama nativo en el host.
 
 Pendiente para cumplir el objetivo completo:

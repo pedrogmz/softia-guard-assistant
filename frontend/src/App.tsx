@@ -1,131 +1,193 @@
-import { useState, useEffect, useRef } from "react";
-import {
-  Phone,
-  Shield,
-  ShieldAlert,
-  Mic,
-  MicOff,
-  Send,
-  QrCode,
-  Sparkles,
-  CheckCircle,
-  XCircle,
-  HelpCircle,
-  ChevronRight,
-  Volume2,
-  VolumeX,
-  MessageCircle
-} from "lucide-react";
-import VirtualAssistantCanvas from "./components/VirtualAssistantCanvas";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ArrowLeft, Check, CheckCircle2, CircleHelp, Clock, Hash, Mic, QrCode, RotateCcw, Siren, SkipForward, Square, UserCheck, WifiOff, X, XCircle } from "lucide-react";
 import QrScanner from "./components/QrScanner";
 import IdScanner from "./components/IdScanner";
-import { motion, AnimatePresence } from "motion/react";
-const BUILDING_NAME = import.meta.env.VITE_BUILDING_NAME;
+import Vigilante, { type Mood } from "./components/Vigilante";
+import { AlphaKeyboard, AptKeypad, FocusBrackets, NumberPad, PanelKey, SimTag, VisitCard, fieldLabel, type LedgerField } from "./components/panel";
+import { config, demoMode, greetingForNow, themeForNow } from "./config";
 
 interface Message {
   role: "user" | "assistant";
   text: string;
+  // false: registro del sistema (dato tecleado, QR, cédula por cámara), nunca se cita como palabras del visitante
+  quote?: boolean;
 }
 
-export default function App() {
-  // Keypad & Apartment Selection States
-  const [apartmentInput, setApartmentInput] = useState<string>("");
+// Diálogo de recolección de datos faltantes antes de autorizar
+// requestMode: sin autorización vigente -> se recogen datos para pedirla al propietario (WhatsApp)
+interface Identity {
+  auth_id: string | null;
+  nombre?: string;
+  cedula?: string;
+  telefono?: string;
+  apartment?: string;
+  motivo?: string;
+  requestMode?: boolean;
+  awaiting: LedgerField | null;
+}
 
-  // Conversational Interface States
-  const [visitorMessage, setVisitorMessage] = useState<string>("");
-  const [chatHistory, setChatHistory] = useState<Message[]>([
-    {
-      role: "assistant",
-      text: `¡Bienvenido a ${BUILDING_NAME || "Edificio XYZ"}! Por favor, marque el número de apartamento en el teclado o dígame a quién viene a visitar.`,
-    },
-  ]);
+// Espera de la respuesta del propietario a la solicitud por WhatsApp (vía Soft-IA)
+interface OwnerWait {
+  id: string;
+  remaining: number;
+  apt: string | null;
+  offline: boolean;
+}
+
+type Outcome = { kind: "ok" | "no" | "error" | "info" };
+type Screen = "none" | "apartment" | "help" | "panic-confirm" | "panic";
+type View = "home" | "apartment" | "step" | "wait" | "calling" | "result" | "help" | "panic-confirm" | "panic";
+
+const FIELD_ORDER: LedgerField[] = ["apartment", "nombre", "cedula", "telefono", "motivo"];
+const RESULT_RESET_S = 15;
+const IDLE_RESET_MS = 60000;
+const RECORD_LIMIT_MS = 10000;
+const APT_MAX = 10;
+
+const welcomeLine = () => `${greetingForNow()}. ¿A qué apartamento viene?`;
+
+// Validación mínima antes de enviar cada dato (prevención de errores)
+function draftProblem(field: LedgerField, draft: string): string | null {
+  const v = draft.trim();
+  if (field === "motivo") return null;
+  if (!v) return "Falta este dato.";
+  if (field === "nombre" && v.split(/\s+/).length < 2) return "Escriba nombre y apellido.";
+  if (field === "cedula" && v.replace(/\D/g, "").length < 6) return "La cédula tiene al menos 6 números.";
+  if (field === "telefono" && v.replace(/\D/g, "").length < 10) return "Escriba el número completo, con el código (0414…).";
+  return null;
+}
+
+const stepPrompt: Record<LedgerField, string> = {
+  apartment: "¿A qué apartamento va?",
+  nombre: "¿Cuál es su nombre completo?",
+  cedula: "¿Cuál es su número de cédula?",
+  telefono: "¿Cuál es su número de teléfono?",
+  motivo: "¿Cuál es el motivo de su visita?",
+};
+
+export default function App() {
+  const reduced = useReducedMotion();
+
+  // Cada visitante empieza una visita nueva (la pantalla se reinicia)
+  const [visitId, setVisitId] = useState(0);
+  const [screen, setScreen] = useState<Screen>("none");
+  const [now, setNow] = useState(() => new Date());
+  const [theme, setTheme] = useState(() => themeForNow());
+  // La orientación del tótem aún no está decidida: el layout se recompone en vertical
+  const [portrait, setPortrait] = useState(() => window.matchMedia("(orientation: portrait)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(orientation: portrait)");
+    const on = () => setPortrait(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+
+  // Apartamento marcado en el teclado
+  const [apartmentInput, setApartmentInput] = useState<string>("");
+  const [aptLetters, setAptLetters] = useState(false);
+
+  // Conversación (el historial alimenta /api/verify; en pantalla solo la última frase)
+  const [chatHistory, setChatHistory] = useState<Message[]>([{ role: "assistant", text: welcomeLine() }]);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   // Transcribiendo el audio de voz en el backend (feedback tras hablar)
   const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
-  // Escáner de código QR (cámara) abierto/cerrado
-  const [qrScannerOpen, setQrScannerOpen] = useState<boolean>(false);
-  // Escáner de cédula (cámara + OCR) abierto/cerrado
-  const [idScannerOpen, setIdScannerOpen] = useState<boolean>(false);
-  // Diálogo de recolección de datos faltantes antes de autorizar
-  // requestMode: sin autorización vigente -> se recogen datos para pedirla al propietario (WhatsApp)
-  interface Identity { auth_id: string | null; nombre?: string; cedula?: string; telefono?: string; apartment?: string; motivo?: string; requestMode?: boolean; awaiting: string | null; }
-  const [identity, setIdentity] = useState<Identity | null>(null);
-  // Espera de la respuesta del propietario a la solicitud por WhatsApp (vía Soft-IA)
-  interface OwnerWait { id: string; remaining: number; apt: string | null; owner: string | null; }
-  const [ownerWait, setOwnerWait] = useState<OwnerWait | null>(null);
-  const ownerPollRef = useRef<any>(null);
-  const ownerWaitIdRef = useRef<string | null>(null);
-  const [animationState, setAnimationState] = useState<"idle" | "talking" | "scanning" | "success" | "denied">("idle");
-
-  // Audio Feedback (Text-to-Speech & Speech-to-Text)
-  const [voiceEnabled, setVoiceEnabled] = useState<boolean>(true);
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  // Fallos seguidos de voz: a partir de dos se sugiere continuar por toque
+  const [voiceMisses, setVoiceMisses] = useState(0);
+  const [micUnavailable, setMicUnavailable] = useState(false);
 
-  // Simulated Hardware States
-  const [gateOpen, setGateOpen] = useState<boolean>(false);
-  const [gateTimer, setGateTimer] = useState<number>(0);
-  const [intercomCalling, setIntercomCalling] = useState<boolean>(false);
-  const [intercomStatus, setIntercomStatus] = useState<string>("");
-  const [alertActive, setAlertActive] = useState<boolean>(false);
-  const [scannedQR, setScannedQR] = useState<boolean>(false);
-  const [identifiedOwner, setIdentifiedOwner] = useState<string | null>(null);
-  const [identifiedApt, setIdentifiedApt] = useState<string | null>(null);
+  // Escáneres de cámara
+  const [qrScannerOpen, setQrScannerOpen] = useState<boolean>(false);
+  const [idScannerOpen, setIdScannerOpen] = useState<boolean>(false);
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  // Datos de la visita (la fila de hoy) y diálogo de datos faltantes
+  const [ledger, setLedger] = useState<Partial<Record<LedgerField, string>>>({});
+  const [identity, setIdentity] = useState<Identity | null>(null);
+  const [askedFields, setAskedFields] = useState<LedgerField[]>([]);
+  const [stepDraft, setStepDraft] = useState("");
+  // La cédula se lee por cámara; si el visitante prefiere, la escribe en el teclado
+  const [cedulaTyping, setCedulaTyping] = useState(false);
+
+  const [ownerWait, setOwnerWait] = useState<OwnerWait | null>(null);
+  const ownerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const ownerWaitIdRef = useRef<string | null>(null);
+
+  // Resultado de la visita y acciones simuladas
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [calling, setCalling] = useState<string | null>(null);
+  const [resetIn, setResetIn] = useState(0);
+  const callingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // STT local: grabación de audio con MediaRecorder (Whisper corre en el backend)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   // Auto-stop de seguridad para no dejar el micrófono grabando indefinidamente
-  const recordTimeoutRef = useRef<any>(null);
+  const recordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastActivityRef = useRef(Date.now());
 
-  // Scroll to bottom of chat (también al mostrar el indicador de procesamiento)
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, isTranscribing, isProcessing]);
+  const busy = isProcessing || isTranscribing;
+  const voiceTrouble = micUnavailable || voiceMisses >= 2;
 
-  // Gate automatic closing countdown
+  const lastAssistant = [...chatHistory].reverse().find((m) => m.role === "assistant")?.text ?? welcomeLine();
+  const lastUser = [...chatHistory].reverse().find((m) => m.role === "user" && m.quote !== false)?.text;
+
+  const view: View =
+    screen === "panic" ? "panic"
+    : screen === "panic-confirm" ? "panic-confirm"
+    : screen === "help" ? "help"
+    : ownerWait ? "wait"
+    : calling ? "calling"
+    : identity?.awaiting && (identity.awaiting !== "cedula" || cedulaTyping) ? "step"
+    : screen === "apartment" ? "apartment"
+    : outcome ? "result"
+    : "home";
+
+
+  // ---------- Reloj, iluminación día/noche y color del condominio ----------
+
   useEffect(() => {
-    if (gateOpen) {
-      setGateTimer(10);
-      const interval = setInterval(() => {
-        setGateTimer((prev) => {
-          if (prev <= 1) {
-            setGateOpen(false);
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [gateOpen]);
+    const t = setInterval(() => {
+      const d = new Date();
+      setNow(d);
+      setTheme(themeForNow(d));
+    }, 20000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  useEffect(() => {
+    document.title = `SoftiaGuard · ${config.buildingName}`;
+  }, []);
+
+  // ---------- Voz ----------
 
   // Speech Synthesis Helper
   const speakText = (text: string) => {
-    if (!voiceEnabled) return;
     try {
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "es-VE"; // Spanish (Venezuela) for mood!
+      utterance.lang = "es-VE";
       utterance.pitch = 1.0;
       utterance.rate = 1.05;
-
-      utterance.onstart = () => {
-        setAnimationState("talking");
-      };
-      utterance.onend = () => {
-        setAnimationState("idle");
-      };
-      utterance.onerror = () => {
-        setAnimationState("idle");
-      };
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
       window.speechSynthesis.speak(utterance);
     } catch (error) {
       console.error("Text-to-speech error:", error);
     }
+  };
+
+  const say = (text: string) => {
+    setChatHistory((prev) => [...prev, { role: "assistant", text }]);
+    speakText(text);
   };
 
   // Libera el micrófono del sistema deteniendo todas las pistas de audio.
@@ -141,14 +203,20 @@ export default function App() {
     }
   };
 
+  // La grabación termina en un callback antiguo: el contador vive en una referencia
+  const voiceMissesRef = useRef(0);
+  voiceMissesRef.current = voiceMisses;
+  const missVoice = (text: string) => {
+    const next = voiceMissesRef.current + 1;
+    voiceMissesRef.current = next;
+    setVoiceMisses(next);
+    say(next >= 2 ? "Disculpe, no logro escucharle bien. Puede continuar tocando la pantalla: marque el apartamento o muestre su código QR." : text);
+  };
+
   // Envía el clip grabado al backend (Whisper local) y usa la transcripción.
   const transcribeAndSend = async (blob: Blob) => {
-    if (blob.size === 0) {
-      setAnimationState("idle");
-      return;
-    }
+    if (blob.size === 0) return;
     setIsTranscribing(true);
-    setAnimationState("scanning");
     try {
       const formData = new FormData();
       formData.append("file", blob, "audio.webm");
@@ -157,22 +225,16 @@ export default function App() {
       const data = await res.json();
       const text = (data.text || "").trim();
       if (text) {
-        setVisitorMessage(text);
+        setVoiceMisses(0);
         setIsTranscribing(false);
-        handleUserInput(text); // toma el relevo del feedback con isProcessing
+        userInputRef.current(text); // toma el relevo del feedback con isProcessing
         return;
       }
       // No se entendió el audio: dar feedback explícito (visual + hablado)
-      const noHear = "Disculpe, no le entendí bien. ¿Podría repetirlo, por favor?";
-      setChatHistory((prev) => [...prev, { role: "assistant", text: noHear }]);
-      setAnimationState("idle");
-      speakText(noHear);
+      missVoice("Disculpe, no le entendí bien. ¿Podría repetirlo, por favor?");
     } catch (e) {
       console.error("Transcription failed:", e);
-      const errMsg = "Disculpe, tuve un problema al escucharle. Por favor, intente de nuevo.";
-      setChatHistory((prev) => [...prev, { role: "assistant", text: errMsg }]);
-      setAnimationState("idle");
-      speakText(errMsg);
+      missVoice("Disculpe, tuve un problema al escucharle. Por favor, intente de nuevo.");
     } finally {
       setIsTranscribing(false);
     }
@@ -181,9 +243,12 @@ export default function App() {
   const startListening = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
       console.error("getUserMedia no disponible (¿contexto seguro? usa localhost o HTTPS)");
+      setMicUnavailable(true);
+      say("El micrófono no está disponible en este momento. Use los botones de la pantalla.");
       return;
     }
     try {
+      window.speechSynthesis.cancel();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
       audioChunksRef.current = [];
@@ -204,16 +269,16 @@ export default function App() {
       mediaRecorderRef.current = recorder;
       recorder.start();
       setIsListening(true);
-      setAnimationState("scanning");
 
       // Red de seguridad: corta la grabación a los 10s
       clearRecordTimeout();
-      recordTimeoutRef.current = setTimeout(() => stopListening(), 10000);
+      recordTimeoutRef.current = setTimeout(() => stopListening(), RECORD_LIMIT_MS);
     } catch (e) {
       console.error("No se pudo acceder al micrófono:", e);
       releaseMicrophone();
       setIsListening(false);
-      setAnimationState("idle");
+      setMicUnavailable(true);
+      say("El micrófono no está disponible en este momento. Use los botones de la pantalla.");
     }
   };
 
@@ -241,104 +306,106 @@ export default function App() {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
           mediaRecorderRef.current.stop();
         }
-      } catch { /* noop */ }
+      } catch {
+        /* noop */
+      }
       releaseMicrophone();
     };
   }, []);
 
-  // Dial Pad clicks
-  const handleKeypadPress = (val: string) => {
-    if (val === "DELETE") {
-      setApartmentInput((prev) => prev.slice(0, -1));
-    } else if (val === "CLEAR") {
-      setApartmentInput("");
-    } else {
-      if (apartmentInput.length < 4) {
-        setApartmentInput((prev) => prev + val);
-      }
-    }
-  };
-
-  // Standard keyboard hooks for Dial Pad
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Focus checking: only register keypad if not typing in the text input box
-      if (document.activeElement?.tagName === "INPUT") return;
-
-      const key = e.key.toUpperCase();
-      if (/^[0-9A-Z]$/.test(key)) {
-        if (apartmentInput.length < 4) {
-          setApartmentInput((prev) => prev + key);
-        }
-      } else if (key === "BACKSPACE") {
-        setApartmentInput((prev) => prev.slice(0, -1));
-      } else if (key === "ENTER") {
-        handleConfirmApartment();
-      } else if (key === "ESCAPE") {
-        setApartmentInput("");
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [apartmentInput]);
+  // ---------- Respuestas del asistente ----------
 
   // ¿Qué dato pide el backend? (cédula por cámara; el resto por voz/teclado)
-  const pickAwaiting = (data: any): string => {
+  const pickAwaiting = (data: any): LedgerField => {
     if (data.action === "show_id_scanner") return "cedula";
-    const missing: string[] = data.missing || [];
+    const missing: LedgerField[] = data.missing || [];
     // En modo solicitud el backend ya los ordena (destino -> nombre -> cédula -> teléfono -> motivo)
     if (data.request_mode && missing.length) return missing[0];
-    return ["telefono", "apartment", "nombre", "cedula"].find((f) => missing.includes(f)) || "nombre";
+    return (["telefono", "apartment", "nombre", "cedula"] as LedgerField[]).find((f) => missing.includes(f)) || "nombre";
   };
 
   // Aplica una respuesta del asistente a la UI (compartida por verify/verify-qr/identify)
-  const applyAssistantResponse = (data: any) => {
-    setChatHistory((prev) => [...prev, { role: "assistant", text: data.reply }]);
-    setAnimationState(data.assistant_animation || "talking");
-    speakText(data.reply);
-    if (data.apartment) setIdentifiedApt(data.apartment);
-    if (data.owner) setIdentifiedOwner(data.owner);
+  const applyAssistantResponse = (data: any, opts: { cancelled?: boolean } = {}) => {
+    if (data.reply) say(data.reply);
+    if (data.apartment) setLedger((prev) => ({ ...prev, apartment: data.apartment }));
 
     // Diálogo de datos faltantes: NO se ejecuta ninguna acción de hardware todavía
-    const needsInfo =
-      data.status === "NEED_INFO" || data.action === "collect_info" || data.action === "show_id_scanner";
+    const needsInfo = data.status === "NEED_INFO" || data.action === "collect_info" || data.action === "show_id_scanner";
     if (needsInfo) {
       const awaiting = pickAwaiting(data);
+      // Orden de los pasos: primero lo ya preguntado, luego lo que falta en el orden del libro
+      setAskedFields((prev) => [...prev, ...FIELD_ORDER.filter((f) => !prev.includes(f) && (f === awaiting || (data.missing || []).includes(f)))]);
+      // Un dato que se vuelve a pedir no quedó aceptado: se borra de la fila
+      setLedger((prev) => {
+        if (!prev[awaiting]) return prev;
+        const next = { ...prev };
+        delete next[awaiting];
+        return next;
+      });
       setIdentity((prev) => ({
         ...(prev || { auth_id: null }),
         auth_id: data.auth_id ?? prev?.auth_id ?? null,
         requestMode: prev?.requestMode || !!data.request_mode,
         awaiting,
       }));
-      if (awaiting === "cedula") setIdScannerOpen(true);
+      setStepDraft("");
+      setScreen("none");
+      if (awaiting === "cedula" && !cedulaTyping) setIdScannerOpen(true);
+      if (awaiting !== "cedula") setCedulaTyping(false);
       return;
     }
 
     // Fin del diálogo de identidad -> ejecutar la acción del tótem
     setIdentity(null);
     setIdScannerOpen(false);
+    setScreen("none");
     if (data.action === "await_owner" && data.request_id) {
-      startOwnerWait(data.request_id, data.expires_in, data.apartment, data.owner);
+      startOwnerWait(data.request_id, data.expires_in, data.apartment);
       return;
     }
-    handleTotemAction(data.action, data.apartment, data.owner);
+    if (opts.cancelled) {
+      setOutcome({ kind: "info" });
+      return;
+    }
+    handleTotemAction(data);
   };
   // El polling llama siempre a la versión más reciente (evita closures obsoletos)
   const applyRef = useRef(applyAssistantResponse);
   applyRef.current = applyAssistantResponse;
 
+  // Ejecuta la acción del tótem según la decisión
+  const handleTotemAction = (data: any) => {
+    if (data.action === "open_gate") {
+      setOutcome({ kind: "ok" });
+    } else if (data.action === "ring_bell" && data.apartment) {
+      // Intercomunicador simulado: el residente "contesta" a los 4 s
+      setCalling(data.apartment);
+      callingTimerRef.current = setTimeout(() => {
+        setCalling(null);
+        setOutcome({ kind: "ok" });
+        say(`El residente del ${data.apartment} autorizó su visita. Pase adelante.`);
+      }, 4000);
+    } else if (data.action === "show_qr_scanner") {
+      setQrScannerOpen(true);
+    } else if (data.status === "DENIED") {
+      setOutcome({ kind: "no" });
+    } else if (data.status === "ERROR" || data.action === "show_error") {
+      setOutcome({ kind: "error" });
+    }
+  };
+
   const stopOwnerWait = () => {
-    clearInterval(ownerPollRef.current);
+    if (ownerPollRef.current) clearInterval(ownerPollRef.current);
     ownerPollRef.current = null;
     ownerWaitIdRef.current = null;
     setOwnerWait(null);
   };
 
   // Espera la respuesta del propietario: cuenta regresiva local + consulta cada 3 s
-  const startOwnerWait = (id: string, expiresIn: number | undefined, apt: string | null, owner: string | null) => {
+  const startOwnerWait = (id: string, expiresIn: number | undefined, apt: string | null) => {
     stopOwnerWait();
     ownerWaitIdRef.current = id;
-    setOwnerWait({ id, remaining: expiresIn ?? 120, apt, owner });
+    setOwnerWait({ id, remaining: expiresIn ?? 120, apt, offline: false });
     let ticks = 0;
     let inFlight = false;
     ownerPollRef.current = setInterval(async () => {
@@ -346,18 +413,19 @@ export default function App() {
       if (++ticks % 3 !== 0 || inFlight) return;
       inFlight = true;
       try {
-        const data = await (await fetch(`/api/access-request/${id}`)).json();
+        const res = await fetch(`/api/access-request/${id}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
         if (ownerWaitIdRef.current !== id) return; // cancelada mientras tanto
         if (data.status === "PENDING_CONFIRMATION") {
-          if (typeof data.expires_in === "number") {
-            setOwnerWait((prev) => prev && { ...prev, remaining: data.expires_in });
-          }
+          setOwnerWait((prev) => prev && { ...prev, offline: false, remaining: typeof data.expires_in === "number" ? data.expires_in : prev.remaining });
         } else {
           stopOwnerWait();
           applyRef.current(data);
         }
       } catch (e) {
         console.warn("Access request poll failed (reintentando):", e);
+        setOwnerWait((prev) => prev && { ...prev, offline: true });
       } finally {
         inFlight = false;
       }
@@ -371,13 +439,15 @@ export default function App() {
     stopOwnerWait();
     try {
       const res = await fetch(`/api/access-request/${id}`, { method: "DELETE" });
-      applyAssistantResponse(await res.json());
+      applyAssistantResponse(await res.json(), { cancelled: true });
     } catch (e) {
       console.error("Cancel access request failed:", e);
+      say("Solicitud cancelada.");
+      setOutcome({ kind: "info" });
     }
   };
 
-  // Solo modo simulado: el propietario pulsa Aprobar/Rechazar en el WhatsApp
+  // Solo modo demo: el propietario pulsa Aprobar/Rechazar en el WhatsApp
   const simulateOwnerDecision = (decision: "aprobada" | "rechazada") => {
     const id = ownerWaitIdRef.current;
     if (!id) return;
@@ -388,34 +458,48 @@ export default function App() {
     }).catch((e) => console.error("Simulated owner decision failed:", e));
   };
 
-  useEffect(() => () => clearInterval(ownerPollRef.current), []);
+  useEffect(
+    () => () => {
+      if (ownerPollRef.current) clearInterval(ownerPollRef.current);
+      if (callingTimerRef.current) clearTimeout(callingTimerRef.current);
+    },
+    []
+  );
 
   // Cuerpo de /api/identify con los datos acumulados (motivo: undefined = aún no preguntado)
   const identityBody = (next: Identity) =>
     JSON.stringify({
-      nombre: next.nombre, cedula: next.cedula, telefono: next.telefono,
-      apartment: next.apartment, auth_id: next.auth_id,
-      motivo: next.motivo, request_mode: !!next.requestMode,
+      nombre: next.nombre,
+      cedula: next.cedula,
+      telefono: next.telefono,
+      apartment: next.apartment,
+      auth_id: next.auth_id,
+      motivo: next.motivo,
+      request_mode: !!next.requestMode,
     });
 
   // Enruta la entrada del visitante: si estamos recogiendo un dato, va a /api/identify
   const handleUserInput = (text: string) => {
-    if (!text.trim()) return;
-    if (identity?.awaiting && identity.awaiting !== "cedula") {
+    if (!text.trim() || busy) return;
+    if (identity?.awaiting && (identity.awaiting !== "cedula" || cedulaTyping)) {
       submitIdentity(identity.awaiting, text);
     } else {
       handleSendRequest(text);
     }
   };
+  const userInputRef = useRef(handleUserInput);
+  userInputRef.current = handleUserInput;
 
   // Envía los datos acumulados a /api/identify (identificación + recolección)
-  const submitIdentity = async (field: string, value: string) => {
-    const next: Identity = { ...(identity || { auth_id: null }), [field]: value.trim(), awaiting: null };
+  const submitIdentity = async (field: LedgerField, value: string) => {
+    const clean = value.trim();
+    const next: Identity = { ...(identity || { auth_id: null }), [field]: clean, awaiting: null };
     setIdentity(next);
-    setChatHistory((prev) => [...prev, { role: "user", text: value }]);
-    setVisitorMessage("");
+    setLedger((prev) => ({ ...prev, [field]: clean || undefined }));
+    // Omitir el motivo no es algo que el visitante haya dicho: no se cita
+    // Cédula y teléfono ya se ven (enmascarados) en la fila: no se citan
+    if (clean) setChatHistory((prev) => [...prev, { role: "user", text: clean, quote: field !== "cedula" && field !== "telefono" }]);
     setIsProcessing(true);
-    setAnimationState("scanning");
     try {
       const res = await fetch("/api/identify", {
         method: "POST",
@@ -425,30 +509,26 @@ export default function App() {
       applyAssistantResponse(await res.json());
     } catch (e) {
       console.error("Identify failed:", e);
-      const msg = "Disculpe, no pude verificar sus datos en este momento. Intente de nuevo.";
-      setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
-      setAnimationState("denied");
-      speakText(msg);
+      say("Disculpe, no pude verificar sus datos en este momento. Intente de nuevo.");
+      setIdentity({ ...next, awaiting: field });
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Inicia la identificación de un invitado (pide el nombre por voz/teclado)
+  // Inicia la identificación de un invitado por nombre (sin QR)
   const handleStartGuest = () => {
     setIdentity({ auth_id: null, awaiting: "nombre" });
-    const msg = "Con gusto. Por favor, dígame su nombre completo para verificar su autorización.";
-    setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
-    setAnimationState("talking");
-    speakText(msg);
+    setAskedFields(["nombre"]);
+    setStepDraft("");
+    say("Con gusto. Dígame o escriba su nombre completo para buscar su autorización.");
   };
 
   // Resultado del IdScanner: envía la foto de la cédula a OCR y continúa la identificación
   const handleCedulaCapture = async (blob: Blob) => {
     setIdScannerOpen(false);
     setIsProcessing(true);
-    setAnimationState("scanning");
-    setChatHistory((prev) => [...prev, { role: "user", text: "Cédula presentada a la cámara" }]);
+    setChatHistory((prev) => [...prev, { role: "user", text: "Cédula presentada a la cámara", quote: false }]);
     try {
       const fd = new FormData();
       fd.append("file", blob, "cedula.jpg");
@@ -457,23 +537,19 @@ export default function App() {
       const data = await res.json();
 
       if (data.error || !data.cedula) {
-        const msg = "No pude leer su cédula con claridad. Por favor, muéstrela de nuevo a la cámara.";
-        setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
-        speakText(msg);
-        setAnimationState("idle");
+        say("No pude leer su cédula con claridad. Muéstrela de nuevo a la cámara o escriba el número.");
         setIdScannerOpen(true);
         return;
       }
       if (data.match === false) {
-        const msg = "El nombre en la cédula no coincide con la autorización. Por favor, contacte al residente o al vigilante.";
-        setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
-        speakText(msg);
-        setAnimationState("denied");
+        say("El nombre en la cédula no coincide con la autorización. Por favor, pida ayuda al vigilante de turno.");
         setIdentity(null);
+        setOutcome({ kind: "no" });
         return;
       }
       const next: Identity = { ...(identity || { auth_id: null }), cedula: String(data.cedula), awaiting: null };
       setIdentity(next);
+      setLedger((prev) => ({ ...prev, cedula: String(data.cedula) }));
       const res2 = await fetch("/api/identify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -482,599 +558,718 @@ export default function App() {
       applyAssistantResponse(await res2.json());
     } catch (e) {
       console.error("Cedula OCR failed:", e);
-      const msg = "Disculpe, hubo un problema al leer la cédula. Intente de nuevo.";
-      setChatHistory((prev) => [...prev, { role: "assistant", text: msg }]);
-      speakText(msg);
-      setAnimationState("idle");
+      say("Disculpe, hubo un problema al leer la cédula. Intente de nuevo o escriba el número.");
+      setIdScannerOpen(true);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Main API query logic for verification
-  const handleSendRequest = async (userMsg: string) => {
+  // Consulta principal de acceso (voz, texto o apartamento marcado)
+  // quote=false: la frase la compuso el tótem (apartamento marcado), no el visitante
+  const handleSendRequest = async (userMsg: string, aptOverride?: string, quote = true) => {
     if (!userMsg.trim()) return;
-
-    const updatedHistory = [...chatHistory, { role: "user" as const, text: userMsg }];
-    setChatHistory(updatedHistory);
-    setVisitorMessage("");
+    const history = chatHistory.slice(-6); // Keep context size reasonable
+    setChatHistory((prev) => [...prev, { role: "user", text: userMsg, quote }]);
+    setOutcome(null);
     setIsProcessing(true);
-    setAnimationState("scanning");
 
     try {
       const response = await fetch("/api/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMsg,
-          history: chatHistory.slice(-6), // Keep context size reasonable
-          currentAptInput: apartmentInput,
-        }),
+        body: JSON.stringify({ message: userMsg, history, currentAptInput: aptOverride ?? apartmentInput }),
       });
-
-      const data = await response.json();
-      applyAssistantResponse(data);
-
+      applyAssistantResponse(await response.json());
     } catch (error) {
       console.error("Verification failed:", error);
-      const errorMsg = "Disculpe, la red del edificio experimenta problemas. Por favor presione el intercomunicador físico.";
-      setChatHistory((prev) => [
-        ...prev,
-        { role: "assistant", text: errorMsg },
-      ]);
-      setAnimationState("denied");
-      speakText(errorMsg);
+      say("Disculpe, no puedo contactar con el sistema en este momento. Intente de nuevo en un momento o pida ayuda al vigilante de turno.");
+      setOutcome({ kind: "error" });
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Action Executor based on state
-  const handleTotemAction = (action: string, apt: string | null, owner: string | null) => {
-    if (action === "open_gate") {
-      setGateOpen(true);
-      setIntercomCalling(false);
-      // Brief confetti or success cue can be added here
-    } else if (action === "ring_bell" && apt) {
-      setIntercomCalling(true);
-      setIntercomStatus(`Llamando al Apartamento ${apt} (${owner || "Residente"})...`);
-      // Simulate resident picking up in 4 seconds
-      setTimeout(() => {
-        setIntercomStatus(`¡Llamada respondida! El residente ha presionado la apertura remota.`);
-        speakText(`Acceso autorizado por la residencia ${apt}. Abriendo portón.`);
-        setTimeout(() => {
-          setGateOpen(true);
-          setIntercomCalling(false);
-        }, 1500);
-      }, 4000);
-    } else if (action === "show_qr_scanner") {
-      setAnimationState("scanning");
-      speakText("Coloque su código QR frente a la cámara para escanearlo.");
-      setQrScannerOpen(true);
-    } else if (action === "show_error") {
-      setAnimationState("denied");
-    }
-  };
-
-  // Green Confirm Button Click Handler (from Teclado Numérico)
   const handleConfirmApartment = () => {
-    if (!apartmentInput) {
-      speakText("Por favor marque un número de apartamento primero.");
-      return;
-    }
-    const aptMsg = `Quiero visitar el apartamento ${apartmentInput}`;
-    handleSendRequest(aptMsg);
-  };
-
-  // Abrir el escáner de QR (cámara real)
-  const handleOpenQrScanner = () => {
-    setQrScannerOpen(true);
+    const apt = apartmentInput.trim();
+    if (!apt || busy) return;
+    setLedger((prev) => ({ ...prev, apartment: apt }));
+    setScreen("none");
+    handleSendRequest(`Quiero visitar el apartamento ${apt}`, apt, false);
   };
 
   // Resultado del escáner: valida el código contra el backend (/api/verify-qr)
   const handleQrResult = async (code: string) => {
     setQrScannerOpen(false);
-    setScannedQR(true);
-    setChatHistory((prev) => [
-      ...prev,
-      { role: "user", text: "Código QR presentado" },
-    ]);
+    setChatHistory((prev) => [...prev, { role: "user", text: "Código QR presentado", quote: false }]);
+    setOutcome(null);
     setIsProcessing(true);
-    setAnimationState("scanning");
-    speakText("Código QR detectado. Verificando credenciales.");
-
+    speakText("Código QR detectado. Verificando.");
     try {
       const response = await fetch("/api/verify-qr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
       });
-      const data = await response.json();
-      applyAssistantResponse(data);
+      applyAssistantResponse(await response.json());
     } catch (error) {
       console.error("QR verification failed:", error);
-      const errorMsg = "Disculpe, no pude verificar el código en este momento. Intente de nuevo o use el intercomunicador.";
-      setChatHistory((prev) => [...prev, { role: "assistant", text: errorMsg }]);
-      setAnimationState("denied");
-      speakText(errorMsg);
+      say("Disculpe, no pude verificar el código en este momento. Intente de nuevo o marque el apartamento.");
+      setOutcome({ kind: "error" });
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Red Panic Button Click Handler
-  const handlePanicButton = () => {
-    setAlertActive(true);
-    setAnimationState("denied");
-    const alertMsg = "¡ALERTA DE EMERGENCIA ACTIVADA! Transmitiendo señal directa al centro de control y contactando patrulla de zona. Mantenga la calma.";
-    setChatHistory((prev) => [
-      ...prev,
-      { role: "assistant", text: alertMsg },
-    ]);
-    speakText(alertMsg);
+  // ---------- Pasos de datos faltantes ----------
 
-    // Auto turn off panic after 8 seconds
-    setTimeout(() => {
-      setAlertActive(false);
-    }, 8000);
+  const stepField = view === "step" ? (identity!.awaiting as LedgerField) : null;
+  const stepIndex = stepField ? Math.max(0, askedFields.indexOf(stepField)) : 0;
+  const stepProblem = stepField ? draftProblem(stepField, stepDraft) : null;
+
+  const typeIntoStep = (k: string) => {
+    if (!stepField) return;
+    const max = stepField === "cedula" ? 10 : stepField === "telefono" ? 11 : stepField === "apartment" ? APT_MAX : 60;
+    setStepDraft((d) => (d.length >= max ? d : d + k));
   };
 
+  const submitStep = () => {
+    if (!stepField || stepProblem || busy) return;
+    submitIdentity(stepField, stepDraft);
+  };
 
+  // «Volver» desanda el camino exacto: el dato anterior se puede corregir
+  const stepBack = () => {
+    if (!stepField) return;
+    const prev = askedFields[stepIndex - 1];
+    if (prev) {
+      setIdentity((id) => id && { ...id, awaiting: prev });
+      setStepDraft((identity as any)?.[prev] || "");
+    } else {
+      setIdentity(null);
+      setAskedFields([]);
+      say(welcomeLine());
+    }
+  };
+
+  const typeCedulaInstead = () => {
+    setIdScannerOpen(false);
+    setIdentity((id) => ({ ...(id || { auth_id: null }), awaiting: "cedula" }));
+    setCedulaTyping(true);
+    setStepDraft("");
+    say("Escriba el número de su cédula y toque «Continuar».");
+  };
+
+  // ---------- Hoja nueva para el siguiente visitante ----------
+
+  const resetVisit = () => {
+    window.speechSynthesis.cancel();
+    stopOwnerWait();
+    if (callingTimerRef.current) clearTimeout(callingTimerRef.current);
+    if (isListening) stopListening();
+    setCalling(null);
+    setOutcome(null);
+    setIdentity(null);
+    setAskedFields([]);
+    setStepDraft("");
+    setCedulaTyping(false);
+    setLedger({});
+    setApartmentInput("");
+    setAptLetters(false);
+    setQrScannerOpen(false);
+    setIdScannerOpen(false);
+    setScreen("none");
+    setVoiceMisses(0);
+    setMicUnavailable(false);
+    setIsSpeaking(false);
+    setChatHistory([{ role: "assistant", text: welcomeLine() }]);
+    setVisitId((v) => v + 1);
+  };
+  const resetRef = useRef(resetVisit);
+  resetRef.current = resetVisit;
+
+  // Tras un resultado, la página pasa sola
+  useEffect(() => {
+    if (view !== "result") return;
+    setResetIn(RESULT_RESET_S);
+    const t = setInterval(() => {
+      setResetIn((s) => {
+        if (s <= 1) {
+          clearInterval(t);
+          resetRef.current();
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [view, outcome]);
+
+  // Inactividad: si nadie toca la pantalla, se vuelve al inicio
+  useEffect(() => {
+    const mark = () => (lastActivityRef.current = Date.now());
+    window.addEventListener("pointerdown", mark);
+    window.addEventListener("keydown", mark);
+    return () => {
+      window.removeEventListener("pointerdown", mark);
+      window.removeEventListener("keydown", mark);
+    };
+  }, []);
+
+  const idleGuardRef = useRef({ view, busy, isListening, dirty: false });
+  idleGuardRef.current = { view, busy, isListening, dirty: chatHistory.length > 1 || Object.keys(ledger).length > 0 || qrScannerOpen || idScannerOpen };
+  useEffect(() => {
+    const t = setInterval(() => {
+      const g = idleGuardRef.current;
+      const held = g.busy || g.isListening || g.view === "wait" || g.view === "calling" || g.view === "panic" || g.view === "result";
+      if (!held && (g.view !== "home" || g.dirty) && Date.now() - lastActivityRef.current > IDLE_RESET_MS) {
+        lastActivityRef.current = Date.now();
+        resetRef.current();
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  // ---------- Teclado físico (mantenimiento y pruebas; el visitante usa la pantalla) ----------
+
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    const key = e.key;
+    if (view === "apartment") {
+      if (/^[0-9a-zA-Z -]$/.test(key)) setApartmentInput((v) => (v.length < APT_MAX ? v + key.toUpperCase() : v));
+      else if (key === "Backspace") setApartmentInput((v) => v.slice(0, -1));
+      else if (key === "Enter") handleConfirmApartment();
+      else if (key === "Escape") setScreen("none");
+    } else if (view === "step") {
+      if (key.length === 1) typeIntoStep(stepField === "nombre" || stepField === "motivo" ? key.toUpperCase() : key);
+      else if (key === "Backspace") setStepDraft((d) => d.slice(0, -1));
+      else if (key === "Enter") submitStep();
+      else if (key === "Escape") stepBack();
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // ---------- Panel de emergencia ----------
+
+  const confirmPanic = () => {
+    setScreen("panic");
+    speakText(
+      config.simulation
+        ? "Alerta de emergencia registrada. Este tótem todavía no está conectado a la central. Si es una emergencia real, llame al 9 1 1."
+        : "Alerta de emergencia enviada al personal de seguridad. Mantenga la calma."
+    );
+  };
+
+  // ---------- Presentación ----------
+
+  const timeText = now.toLocaleTimeString("es-VE", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+  const phrase =
+    view === "panic" ? "Alerta de emergencia"
+    : view === "panic-confirm" ? "¿Necesita ayuda urgente?"
+    : view === "help" ? "Así puede entrar"
+    : isListening ? "Le escucho. Hable ahora."
+    : isTranscribing ? "Un momento, estoy entendiendo lo que dijo…"
+    : isProcessing ? "Un momento, estoy verificando…"
+    : lastAssistant;
+
+  // La franja de la pantalla nombra siempre el paso actual
+  const stepName =
+    view === "panic" || view === "panic-confirm" ? "Emergencia"
+    : view === "help" ? "Ayuda"
+    : isListening ? "Escuchando"
+    : isTranscribing ? "Entendiendo"
+    : isProcessing ? "Verificando"
+    : view === "apartment" ? "Marcar apartamento"
+    : view === "step" && stepField ? `Datos de la visita · ${fieldLabel[stepField]}`
+    : view === "wait" ? "Esperando al residente"
+    : view === "calling" ? "Llamando al residente"
+    : view === "result" && outcome?.kind === "ok" ? "Acceso autorizado"
+    : view === "result" && outcome?.kind === "no" ? "Acceso no autorizado"
+    : view === "result" && outcome?.kind === "error" ? "Sin conexión"
+    : view === "result" ? "Solicitud cancelada"
+    : "Inicio";
+
+  const mood: Mood =
+    isListening ? "listening"
+    : busy ? "thinking"
+    : view === "result" && outcome?.kind === "ok" ? "happy"
+    : view === "result" && outcome?.kind === "no" ? "sad"
+    : view === "result" && outcome?.kind === "error" ? "sorry"
+    : view === "panic" ? "sad"
+    : view === "wait" || view === "calling" ? "waiting"
+    : isSpeaking ? "talking"
+    : "idle";
+
+  const stateTone = view === "result" && outcome?.kind === "ok" ? "ok" : view === "result" && outcome?.kind === "no" ? "no" : view === "wait" || view === "calling" ? "wait" : null;
+  const visitFields: LedgerField[] = ledger.nombre || view === "step" || view === "wait" ? ["apartment", "nombre", "cedula", "telefono", "motivo"] : ["apartment", "nombre"];
+
+  const screenTurn = reduced
+    ? {}
+    : {
+        initial: { opacity: 0, y: 24 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -24 },
+        transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const },
+      };
 
   return (
-    <div className="min-h-screen bg-[#0A0A0A] text-white flex flex-col font-sans overflow-x-hidden antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
+    <div className="brushed relative flex h-dvh w-full flex-col gap-[1.4rem] px-[1.4rem] pb-[2.4rem] pt-[2.2rem] landscape:flex-row">
+      {/* Lente de la cámara del tótem, asentada en el marco */}
+      <span aria-hidden className="absolute left-1/2 top-[0.55rem] h-[1rem] w-[1rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_35%_35%,#6f90b0,#0b1522_62%)] shadow-[0_0_0_0.18rem_var(--bezel)]" />
+      {/* Grabado del marco */}
+      <p aria-hidden className="engraved absolute inset-x-0 bottom-[0.6rem] text-center text-[1rem] font-semibold uppercase tracking-[0.3em]">SoftiaGuard · Soft-IA</p>
 
-      {/* Top Header */}
-      <header className="h-16 border-b border-white/10 px-6 md:px-8 flex items-center justify-between bg-[#111111] shrink-0 z-20 shadow-md">
-        <div className="flex items-center gap-3">
-          <div className={`w-3 h-3 rounded-full transition-all duration-500 ${gateOpen
-              ? "bg-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.8)]"
-              : alertActive
-                ? "bg-rose-500 shadow-[0_0_12px_rgba(239,68,68,0.8)] animate-pulse"
-                : "bg-cyan-500 shadow-[0_0_12px_rgba(6,182,212,0.8)]"
-            }`}></div>
-          <span className="text-xs md:text-sm font-display font-medium tracking-widest uppercase text-white/70">
-            {BUILDING_NAME || "Edificio XYZ"} | Asistente de Vigilancia Soft-IA
-          </span>
+      {/* Pantalla del Vigilante */}
+      <main className="glass relative flex min-h-0 flex-col overflow-hidden rounded-[1.6rem] landscape:flex-[1.38] portrait:flex-[1.2]">
+        <div className="flex items-center justify-between gap-[1rem] border-b-[0.12rem] border-screen-edge/60 px-[1.6rem] py-[0.7rem]">
+          <p className="flex items-center gap-[0.6rem] text-[1.1rem] font-semibold text-ink">
+            <span aria-hidden className={`inline-block h-[0.75rem] w-[0.75rem] rounded-full ${stateTone === "ok" ? "bg-ok" : stateTone === "no" ? "bg-no" : stateTone === "wait" || busy ? "bg-wait" : isListening ? "bg-call" : "bg-legend"}`} />
+            {stepName}
+          </p>
+          <p className="text-[1.1rem] font-medium tabular-nums text-ink-soft">
+            {[config.buildingName, timeText].join(" · ")}
+          </p>
         </div>
-        <div className="flex items-center gap-6 text-xs md:text-sm text-white/50 font-mono">
-          <span className="hidden sm:inline">Guatire, VZLA</span>
-          <span>24.5°C</span>
-          <span>{new Date().toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false })}</span>
-        </div>
-      </header>
 
-      <div className="flex-1 flex flex-col md:flex-row items-stretch overflow-hidden relative">
-
-
-
-        {/* Core Layout Grid */}
-        <div className="flex-1 flex flex-col lg:flex-row p-6 md:p-8 gap-8 items-stretch overflow-y-auto">
-
-          {/* 2. Left Section: Virtual Assistant Avatar & Status */}
-          <div className="flex-1 flex flex-col gap-6 min-h-[440px]">
-            <div className="flex-1 relative bg-gradient-to-b from-[#151515] to-[#0A0A0A] rounded-3xl border border-white/5 overflow-hidden flex flex-col items-center justify-center p-6 min-h-[300px]">
-
-              {/* Status Banner */}
-              <div className="absolute top-6 left-6 px-3 py-1.5 rounded-full text-[10px] font-mono bg-black/60 border border-white/10 text-emerald-400 uppercase tracking-widest flex items-center gap-2 backdrop-blur-md z-10 shadow-lg">
-                <span className={`w-2 h-2 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)] ${animationState === "idle" ? "bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.5)]" :
-                    animationState === "talking" ? "bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.5)]" :
-                      animationState === "scanning" ? "bg-blue-500 animate-spin" :
-                        animationState === "success" ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "bg-rose-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"
-                  }`} />
-                {animationState === "idle" ? "En Espera" :
-                  animationState === "talking" ? "Transmitiendo" :
-                    animationState === "scanning" ? "Analizando" :
-                      animationState === "success" ? "Aprobado" : "Denegado"}
-              </div>
-
-              {/* Quick Simulate QR Action on top right of screen */}
-              <button
-                onClick={handleOpenQrScanner}
-                title="Escanear Código QR"
-                className="absolute top-6 right-6 p-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 hover:text-white transition-all backdrop-blur-md z-10 cursor-pointer"
-              >
-                <QrCode className="w-5 h-5" />
-              </button>
-
-              {/* ThreeJS Rendering Area */}
-              <div className="absolute inset-0 w-full h-full">
-                <VirtualAssistantCanvas animationState={animationState} />
-              </div>
-
-              {/* Float dialog at the bottom center of Avatar Screen */}
-              <div className="absolute bottom-6 left-6 right-6 bg-black/60 border border-white/10 rounded-2xl p-4 backdrop-blur-md z-10 max-w-xl mx-auto shadow-2xl">
-                <p className="text-emerald-400 text-[10px] font-mono tracking-widest uppercase mb-1.5">Asistente Virtual</p>
-                {isTranscribing || isProcessing ? (
-                  <p className="text-sm sm:text-base leading-relaxed text-emerald-300/90 font-sans font-medium flex items-center gap-2">
-                    <span className="flex gap-1">
-                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0s" }} />
-                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }} />
-                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }} />
-                    </span>
-                    {isTranscribing ? "Entendiendo su mensaje…" : "Verificando su solicitud…"}
-                  </p>
-                ) : (
-                  <p className="text-sm sm:text-base leading-relaxed text-slate-100 font-sans font-medium">
-                    "{chatHistory[chatHistory.length - 1]?.text}"
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Voice status bar & Microphone control */}
-            <div className="h-24 bg-[#1A1A1A] rounded-2xl border border-white/5 p-4 flex items-center gap-4 shrink-0 shadow-lg">
-              <div className="flex-1">
-                <div className="text-[10px] text-white/30 uppercase tracking-widest mb-1.5 font-mono">Entrada de voz detectada</div>
-                <div className="flex items-end gap-1.5 h-6">
-                  {isListening ? (
-                    <>
-                      <div className="w-1 h-3 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "0s" }}></div>
-                      <div className="w-1 h-5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }}></div>
-                      <div className="w-1 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }}></div>
-                      <div className="w-1 h-6 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "0.45s" }}></div>
-                      <div className="w-1 h-4 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "0.6s" }}></div>
-                      <div className="w-1 h-5 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: "0.75s" }}></div>
-                      <span className="ml-2 text-emerald-400 font-mono text-xs animate-pulse">Escuchando... Hable ahora</span>
-                    </>
-                  ) : (
-                    <>
-                      <div className="w-1 h-2 bg-white/10 rounded-full"></div>
-                      <div className="w-1 h-2 bg-white/10 rounded-full"></div>
-                      <div className="w-1 h-2 bg-white/10 rounded-full"></div>
-                      <div className="w-1 h-2 bg-white/10 rounded-full"></div>
-                      <div className="w-1 h-2 bg-white/10 rounded-full"></div>
-                      <span className="ml-2 text-white/40 italic text-xs">
-                        {isTranscribing ? "Procesando su voz…" : isProcessing ? "Verificando…" : "Presione el micrófono para hablar"}
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Voice feedback switch */}
-                <button
-                  onClick={() => setVoiceEnabled(!voiceEnabled)}
-                  title={voiceEnabled ? "Silenciar Voz" : "Activar Voz (TTS)"}
-                  className={`p-3 rounded-full border transition-all cursor-pointer ${voiceEnabled ? "bg-emerald-950/40 border-emerald-500/30 text-emerald-400" : "bg-white/5 border-white/10 text-white/40"
-                    }`}
-                >
-                  {voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-                </button>
-
-                {/* Microphone trigger button */}
-                <button
-                  onClick={toggleListening}
-                  disabled={!isListening && (isProcessing || isTranscribing)}
-                  className={`p-3.5 rounded-full transition-all cursor-pointer shadow-md disabled:opacity-40 disabled:cursor-not-allowed ${isListening
-                      ? "bg-rose-600 hover:bg-rose-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)]"
-                      : "bg-white/5 hover:bg-white/10 border border-white/10 text-white/90"
-                    }`}
-                  title={isListening ? "Detener Grabación" : "Hablar con el Vigilante"}
-                >
-                  <Mic className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. Center-Right Section: Numeric Keypad */}
-          <div className="w-full lg:w-80 flex flex-col gap-6 shrink-0">
-            <div className="flex-1 bg-[#151515] rounded-3xl border border-white/5 p-6 flex flex-col justify-between shadow-xl">
-              <div>
-                <label className="block text-[10px] font-mono tracking-widest text-center text-white/40 mb-3 uppercase font-bold">
-                  MARQUE NÚMERO DE APARTAMENTO
-                </label>
-                <div className="bg-black/60 rounded-xl p-4 mb-6 border border-white/5 flex items-center justify-center relative shadow-inner">
-                  <span className="text-[10px] uppercase tracking-widest text-white/30 absolute left-4 font-mono">APT</span>
-                  <span className="text-4xl font-light tracking-[0.2em] text-emerald-500 font-display">
-                    {apartmentInput || "----"}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={visitId} {...screenTurn} className="flex min-h-0 flex-1 items-stretch gap-[1.4rem] px-[1.6rem] pb-[1.4rem] pt-[1rem] portrait:flex-col portrait:gap-[1rem]">
+            {/* Ventana de video del Vigilante */}
+            <div className={`relative flex shrink-0 flex-col overflow-hidden rounded-[1.2rem] shadow-[inset_0_0_0_0.12rem_var(--screen-edge)] landscape:w-[42%] portrait:h-[48%] portrait:w-full ${stateTone === "ok" ? "bg-ok-tint" : stateTone === "no" ? "bg-no-tint" : stateTone === "wait" ? "bg-wait-tint" : "bg-key"}`}>
+              <div className="relative min-h-0 flex-1">
+                {/* En el primer plano horizontal, las barras del logo de Soft-IA flanquean al Vigilante */}
+                {!portrait && (
+                  <span aria-hidden className="pointer-events-none absolute inset-x-0 top-[9%] z-10">
+                    <span className="absolute left-[4%] top-0 h-[0.45rem] w-[9%] rounded-full bg-sky" />
+                    <span className="absolute left-[2%] top-[1rem] h-[0.45rem] w-[12%] rounded-full bg-orange" />
+                    <span className="absolute right-[4%] top-0 h-[0.45rem] w-[9%] rounded-full bg-sky" />
+                    <span className="absolute right-[6%] top-[1rem] h-[0.45rem] w-[7%] rounded-full bg-blue" />
                   </span>
-                  <span className="text-[9px] font-mono text-white/20 absolute right-4">[{apartmentInput.length}/4]</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  {/* Keypad Buttons matching exact styling */}
-                  {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
-                    <button
-                      key={num}
-                      onClick={() => handleKeypadPress(num)}
-                      className="bg-white/5 border border-white/5 rounded-2xl h-14 flex items-center justify-center text-xl font-light hover:bg-white/10 active:scale-95 transition-all text-white/90 cursor-pointer"
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => handleKeypadPress("CLEAR")}
-                    className="bg-white/5 border border-white/5 rounded-2xl h-14 flex items-center justify-center hover:bg-white/10 active:scale-95 transition-all text-white/40 font-mono text-[10px] uppercase tracking-widest cursor-pointer"
-                  >
-                    CLR
-                  </button>
-                  <button
-                    onClick={() => handleKeypadPress("0")}
-                    className="bg-white/5 border border-white/5 rounded-2xl h-14 flex items-center justify-center text-xl font-light hover:bg-white/10 active:scale-95 transition-all text-white/90 cursor-pointer"
-                  >
-                    0
-                  </button>
-                  <button
-                    onClick={() => handleKeypadPress("DELETE")}
-                    className="bg-white/5 border border-white/5 rounded-2xl h-14 flex items-center justify-center hover:bg-white/10 active:scale-95 transition-all text-rose-500/70 cursor-pointer"
-                    title="Borrar dígito"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 9.75L14.25 12m0 0l2.25 2.25M14.25 12l2.25-2.25M14.25 12L12 14.25m-2.58 4.92l-6.375-6.375a1.125 1.125 0 010-1.59L9.42 4.83c.211-.211.498-.33.795-.33H19.5a2.25 2.25 0 012.25 2.25v10.5a2.25 2.25 0 01-2.25 2.25h-9.284c-.297 0-.584-.119-.795-.33z" />
-                    </svg>
-                  </button>
-                </div>
+                )}
+                <Vigilante mood={mood} fit={portrait ? "meet" : "slice"} className="absolute inset-0 h-full w-full p-[0.6rem]" />
               </div>
-
-              <div className="space-y-4 pt-6 mt-6 border-t border-white/5">
-                <button
-                  onClick={handleConfirmApartment}
-                  className="h-16 w-full bg-emerald-600 hover:bg-emerald-500 rounded-2xl shadow-[0_4px_20px_rgba(16,185,129,0.4)] flex items-center justify-center gap-3 transition-colors text-white font-bold uppercase tracking-[0.1em] cursor-pointer"
-                >
-                  <span>Confirmar</span>
-                  <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="3">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                </button>
-
-                {/* Red Panic Trigger */}
-                <button
-                  onClick={handlePanicButton}
-                  className="w-full py-2.5 bg-rose-950/30 hover:bg-rose-900/40 text-rose-400 hover:text-white font-mono text-[10px] uppercase tracking-wider rounded-xl border border-rose-900/30 hover:border-rose-700/50 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <ShieldAlert className="w-3.5 h-3.5 animate-pulse" />
-                  BOTÓN DE PÁNICO
-                </button>
-
-              </div>
-
-              {/* Simulaciones */}
-              <div className="space-y-4 pt-6 mt-6 border-t border-white/5">
-                <button
-                  onClick={handleOpenQrScanner}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-950/20 border border-emerald-500/20 hover:border-emerald-500/50 text-emerald-400 hover:text-emerald-300 transition-all cursor-pointer font-mono text-[10px]"
-                >
-                  [Escanear QR]
-                </button>
-                <button
-                  onClick={handleStartGuest}
-                  className="px-2.5 py-1 rounded-lg bg-cyan-950/20 border border-cyan-500/20 hover:border-cyan-500/50 text-cyan-400 hover:text-cyan-300 transition-all cursor-pointer font-mono text-[10px]"
-                >
-                  [Soy invitado]
-                </button>
-                <button
-                  onClick={() => {
-                    setApartmentInput("3A");
-                    handleSendRequest("Quiero ir al apartamento 3A");
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-rose-950/20 border border-rose-500/20 hover:border-rose-500/50 text-rose-400 hover:text-rose-300 transition-all cursor-pointer font-mono text-[10px]"
-                >
-                  [Probar 3A]
-                </button>
-                <button
-                  onClick={() => {
-                    setApartmentInput("1B");
-                    handleSendRequest("Quiero ver a Carlos Rodríguez");
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-amber-950/20 border border-amber-500/20 hover:border-amber-500/50 text-amber-400 hover:text-amber-300 transition-all cursor-pointer font-mono text-[10px]"
-                >
-                  [Probar 1B]
-                </button>
-              </div>
+              <p className="flex items-center justify-between gap-[0.6rem] bg-[color-mix(in_oklab,var(--navy)_88%,transparent)] px-[0.9rem] py-[0.45rem] text-[1rem] font-medium text-white">
+                <span className="flex items-center gap-[0.5rem] whitespace-nowrap">
+                  <span aria-hidden className="inline-block h-[0.6rem] w-[0.6rem] rounded-full bg-sky" />
+                  Vigilante Virtual
+                </span>
+              </p>
             </div>
-          </div>
 
-          {/* 4. Far Right Section: Interactive Chat Box & Device Status */}
-          <div className="w-full lg:w-96 flex flex-col gap-6 shrink-0">
-
-            {/* Active Gate Access Indicator Section */}
-            <div className="p-5 rounded-3xl bg-[#111111] border border-white/5 shadow-xl flex flex-col gap-4">
-              <h3 className="text-xs font-mono tracking-widest text-white/40 uppercase font-bold flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-400" />
-                Estado de Acceso
-              </h3>
-
-              <div className="flex items-center gap-4 py-1">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border transition-all duration-300 ${gateOpen
-                    ? "bg-emerald-950/40 border-emerald-500 text-emerald-400 shadow-lg shadow-emerald-500/20"
-                    : "bg-[#151515] border-white/5 text-white/30"
-                  }`}>
-                  <CheckCircle className={`w-6 h-6 ${gateOpen ? "animate-pulse" : ""}`} />
-                </div>
-                <div className="flex-1">
-                  <p className="text-[10px] font-mono text-white/30 tracking-wider">PORTÓN VEHICULAR</p>
-                  <p className={`text-sm font-display font-bold ${gateOpen ? "text-emerald-400" : "text-white/60"}`}>
-                    {gateOpen ? `ABIERTO - Cierra en ${gateTimer}s` : "BLOQUEADO / SEGURIDAD"}
+            <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+              <div aria-live="polite" className="pt-[0.6rem]">
+                <p className={`font-semibold leading-[1.15] text-ink [text-wrap:pretty] ${phrase.length > 80 ? "text-[2.35rem]" : "text-[2.6rem]"}`}>{phrase}</p>
+                {view === "home" && !busy && !isListening && chatHistory.length === 1 && (
+                  <p className="mt-[0.8rem] text-[1.3rem] leading-snug text-ink-soft">Toque «Hablar» y dígamelo, muestre su código QR o marque el apartamento.</p>
+                )}
+                {lastUser && view !== "help" && view !== "panic" && view !== "panic-confirm" && (
+                  <p className="mt-[0.8rem] text-[1.2rem] text-ink-soft">
+                    Usted: <span className="font-semibold text-ink">«{lastUser}»</span>
                   </p>
-                </div>
-                {gateOpen && (
-                  <div className="text-emerald-400 bg-emerald-950/40 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-emerald-500/20 animate-pulse font-mono uppercase tracking-wider">
-                    Pase
-                  </div>
                 )}
               </div>
 
-              {/* Espera de la respuesta del propietario (WhatsApp vía Soft-IA) */}
-              {ownerWait && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-sky-950/20 border border-sky-500/30 p-3 rounded-xl flex flex-col gap-2"
-                >
-                  <div className="flex items-center gap-3">
-                    <MessageCircle className="w-4 h-4 text-sky-400 shrink-0 animate-pulse" />
-                    <div className="flex-1">
-                      <p className="text-[9px] font-mono text-sky-400 uppercase tracking-widest font-bold">Solicitud por WhatsApp</p>
-                      <p className="text-xs text-white/80 font-medium">
-                        Esperando respuesta del residente{ownerWait.apt ? ` de ${ownerWait.apt}` : ""}…
-                      </p>
-                    </div>
-                    <span className="font-mono text-sm text-sky-300 tabular-nums">
-                      {Math.floor(ownerWait.remaining / 60)}:{String(ownerWait.remaining % 60).padStart(2, "0")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleCancelOwnerWait}
-                      className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 hover:border-white/30 text-white/70 hover:text-white transition-all cursor-pointer font-mono text-[10px]"
-                    >
-                      Cancelar
-                    </button>
-                    <span className="flex-1" />
-                    <span className="font-mono text-[9px] text-white/30">Simular:</span>
-                    <button
-                      onClick={() => simulateOwnerDecision("aprobada")}
-                      className="px-2 py-1 rounded-lg bg-emerald-950/20 border border-emerald-500/20 hover:border-emerald-500/50 text-emerald-400 transition-all cursor-pointer font-mono text-[10px]"
-                    >
-                      [Aprobar]
-                    </button>
-                    <button
-                      onClick={() => simulateOwnerDecision("rechazada")}
-                      className="px-2 py-1 rounded-lg bg-rose-950/20 border border-rose-500/20 hover:border-rose-500/50 text-rose-400 transition-all cursor-pointer font-mono text-[10px]"
-                    >
-                      [Rechazar]
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Intercom Ringing Simulation Screen */}
-              {intercomCalling && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-emerald-950/20 border border-emerald-500/30 p-3 rounded-xl flex items-center gap-3 animate-pulse"
-                >
-                  <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-[9px] font-mono text-emerald-400 uppercase tracking-widest font-bold">Intercomunicador</p>
-                    <p className="text-xs text-white/80 font-medium">{intercomStatus}</p>
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Emergency Alarm Banner */}
-              {alertActive && (
-                <motion.div
-                  initial={{ scale: 0.95 }}
-                  animate={{ scale: [0.95, 1.02, 0.95] }}
-                  transition={{ repeat: Infinity, duration: 1.5 }}
-                  className="bg-rose-950/40 border border-rose-500/40 p-3 rounded-xl flex items-center gap-3 text-rose-300"
-                >
-                  <ShieldAlert className="w-5 h-5 shrink-0 text-rose-400 animate-bounce" />
-                  <div>
-                    <p className="text-xs font-bold uppercase font-display tracking-wide text-rose-400">ALARMA ACTIVA</p>
-                    <p className="text-[10px] text-rose-300/70">Señal de emergencia transmitida al centro de control.</p>
-                  </div>
-                </motion.div>
-              )}
-            </div>
-
-            {/* Interactive Chat interface to type custom messages */}
-            <div className="p-5 rounded-3xl bg-[#111111] border border-white/5 shadow-xl flex flex-col gap-4 flex-1 min-h-[220px] max-h-[340px]">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-mono tracking-widest text-white/40 uppercase font-bold flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-emerald-400" />
-                  Bitácora de Conversación
-                </h3>
-                <button
-                  onClick={() => setChatHistory([
-                    { role: "assistant", text: "¡Bienvenido a Residencias El Ávila! ¿Cómo puedo ayudarle hoy?" }
-                  ])}
-                  className="text-[9px] text-white/30 hover:text-white/60 font-bold uppercase tracking-wider transition-colors"
-                >
-                  Limpiar
-                </button>
-              </div>
-
-              {/* Chat message list */}
-              <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 text-xs">
-                {chatHistory.map((chat, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex flex-col ${chat.role === "user" ? "items-end" : "items-start"}`}
-                  >
-                    <span className="text-[9px] font-mono text-white/30 mb-1 uppercase tracking-wider">
-                      {chat.role === "user" ? "Visitante" : "Asistente Virtual"}
-                    </span>
-                    <div className={`p-3 rounded-2xl max-w-[85%] leading-relaxed ${chat.role === "user"
-                        ? "bg-[#10b981]/95 text-white rounded-tr-none shadow-md shadow-emerald-900/10"
-                        : "bg-[#151515] border border-white/5 text-white/90 rounded-tl-none"
-                      }`}>
-                      {chat.text}
-                    </div>
-                  </div>
-                ))}
-                {(isTranscribing || isProcessing) && (
-                  <div className="flex flex-col items-start">
-                    <span className="text-[9px] font-mono text-white/30 mb-1 uppercase tracking-wider">
-                      Asistente Virtual
-                    </span>
-                    <div className="p-3 rounded-2xl rounded-tl-none bg-[#151515] border border-white/5 text-white/70 flex items-center gap-2">
-                      <span className="flex gap-1">
-                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0s" }} />
-                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.15s" }} />
-                        <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-bounce" style={{ animationDelay: "0.3s" }} />
-                      </span>
-                      <span className="text-[11px] font-mono">
-                        {isTranscribing ? "Entendiendo su mensaje…" : "Verificando acceso…"}
-                      </span>
-                    </div>
-                  </div>
+              <div className="mt-auto flex flex-col gap-[0.8rem] pt-[0.8rem]">
+                {view === "apartment" && <AptDisplay value={apartmentInput} />}
+                {view === "step" && stepField && (
+                  <StepDisplay field={stepField} index={stepIndex} total={askedFields.length} draft={stepDraft} problem={stepDraft ? stepProblem : null} />
                 )}
-                <div ref={chatEndRef} />
+                {(view === "result" || view === "wait" || view === "calling" || view === "step" || (view === "home" && Object.keys(ledger).length > 0)) && (
+                  <VisitCard values={ledger} fields={visitFields} active={stepField} onlyFilled={view !== "step"} />
+                )}
+                {view === "help" && <HelpPanel />}
+                {view === "panic-confirm" && (
+                  <p className="text-[1.4rem] leading-snug text-ink-soft">Si alguien está en peligro, confirme la alerta. Si solo necesita orientación, toque «Ayuda».</p>
+                )}
+                {view === "panic" && <PanicPanel />}
               </div>
-
-              {/* Input form & Send button */}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  handleUserInput(visitorMessage);
-                }}
-                className="flex gap-2 pt-3 border-t border-white/5 shrink-0"
-              >
-                <input
-                  type="text"
-                  value={visitorMessage}
-                  onChange={(e) => setVisitorMessage(e.target.value)}
-                  placeholder="Escriba aquí (ej. Vengo al 2B...)"
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-[#151515] border border-white/5 text-white/90 placeholder-white/20 focus:outline-none focus:border-emerald-500/40 text-xs transition-all"
-                  disabled={isProcessing}
-                />
-                <button
-                  type="submit"
-                  disabled={isProcessing || !visitorMessage.trim()}
-                  className="p-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 disabled:hover:bg-emerald-600 cursor-pointer active:scale-95 transition-all shadow-lg shadow-emerald-900/20"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
             </div>
+          </motion.div>
+        </AnimatePresence>
+
+        {qrScannerOpen && (
+          <QrScanner
+            onResult={handleQrResult}
+            onClose={() => setQrScannerOpen(false)}
+            onFallback={() => {
+              setQrScannerOpen(false);
+              setApartmentInput("");
+              setScreen("apartment");
+            }}
+          />
+        )}
+        {idScannerOpen && (
+          <IdScanner
+            onCapture={handleCedulaCapture}
+            onType={typeCedulaInstead}
+            onClose={() => {
+              setIdScannerOpen(false);
+              setIdentity(null);
+              say("Muy bien. Si desea continuar, toque «Hablar» o marque el apartamento.");
+            }}
+          />
+        )}
+      </main>
+
+      {/* Panel de teclas */}
+      <aside className="relative z-10 flex min-h-0 flex-col gap-[0.9rem] rounded-[1.6rem] bg-panel p-[1.2rem] shadow-[inset_0_0_0_0.12rem_var(--key-edge),0_0.4rem_1.2rem_rgb(0_0_0/0.1)] landscape:flex-1 portrait:flex-1">
+        <div className="flex items-center gap-[0.9rem]">
+          <span className="flex h-[3.4rem] w-[3.6rem] shrink-0 items-center justify-center rounded-[0.7rem] bg-white p-[0.3rem] shadow-[inset_0_0_0_0.1rem_var(--key-edge)]">
+            <img src="/brand/soft-ia-logo.png" alt="Soft-IA" className="h-full w-auto object-contain" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[1.7rem] font-bold leading-none tracking-[-0.01em] text-ink">SoftiaGuard</p>
+            <p className="mt-[0.3rem] text-[1rem] font-medium text-ink-soft">Vigilante Virtual · {config.unitName} · por Soft-IA</p>
           </div>
         </div>
-      </div>
+        {/* Altavoz: ocupa el espacio libre del panel, como en un videoportero */}
+        <span aria-hidden className={`grille shrink-0 rounded-[0.8rem] ${view === "apartment" || view === "step" ? "h-[1.2rem]" : "h-[2.6rem]"}`} />
 
-      {/* Footer matching Design HTML */}
-      <footer className="h-12 px-6 md:px-8 border-t border-white/5 flex items-center justify-between bg-black/40 text-[10px] text-white/30 uppercase tracking-widest shrink-0">
-        <span>VERSION: V0.3</span>
-        <span>Ubicación: {BUILDING_NAME || "Edificio XYZ"}</span>
-        <div className="flex gap-4">
-          <span>Ayuda</span>
-          <span>Privacidad</span>
+        {demoMode && (
+          <DemoTray
+            waiting={view === "wait"}
+            onTry={(apt, msg) => {
+              setLedger({ apartment: apt });
+              setApartmentInput(apt);
+              handleSendRequest(msg, apt, false);
+            }}
+            onOwner={simulateOwnerDecision}
+          />
+        )}
+
+        <div className="flex min-h-0 flex-1 flex-col justify-end gap-[0.9rem]">
+          {view === "home" && (
+            <>
+              <TalkKey listening={isListening} busy={busy} onPress={toggleListening} primary={!voiceTrouble} />
+              <div className="relative">
+                <PanelKey tone={voiceTrouble ? "call" : "key"} icon={<QrCode />} onClick={() => setQrScannerOpen(true)} disabled={busy || isListening} hint="Si el residente le envió un código" className="min-h-[4.2rem] w-full text-[1.5rem]">
+                  Tengo código QR
+                </PanelKey>
+              </div>
+              <PanelKey icon={<Hash />} onClick={() => { setApartmentInput(""); setAptLetters(false); setScreen("apartment"); }} disabled={busy || isListening} hint="Con el teclado de la pantalla" className="min-h-[4.2rem] w-full text-[1.5rem]">
+                Marcar apartamento
+              </PanelKey>
+            </>
+          )}
+
+          {view === "apartment" && (
+            <>
+              <AptKeypad letters={aptLetters} onLetters={setAptLetters} onKey={(k) => setApartmentInput((v) => (v.length + k.length <= APT_MAX ? v + k : v))} onDelete={() => setApartmentInput((v) => v.slice(0, -1))} />
+              <div className="grid grid-cols-[1fr_2fr] gap-[0.7rem]">
+                <PanelKey tone="quiet" icon={<ArrowLeft />} onClick={() => { setApartmentInput(""); setScreen("none"); }}>
+                  Volver
+                </PanelKey>
+                <PanelKey tone="call" icon={<Check />} onClick={handleConfirmApartment} disabled={!apartmentInput || busy} className="justify-center text-[1.4rem]">
+                  Confirmar {apartmentInput && `apto ${apartmentInput}`}
+                </PanelKey>
+              </div>
+            </>
+          )}
+
+          {view === "step" && stepField && (
+            <>
+              {stepField === "cedula" || stepField === "telefono" ? (
+                <NumberPad onKey={typeIntoStep} onDelete={() => setStepDraft((d) => d.slice(0, -1))} prefixKeys={stepField === "cedula" && !stepDraft ? ["V", "E"] : undefined} />
+              ) : stepField === "apartment" ? (
+                <AptKeypad letters={aptLetters} onLetters={setAptLetters} onKey={typeIntoStep} onDelete={() => setStepDraft((d) => d.slice(0, -1))} />
+              ) : (
+                <AlphaKeyboard onKey={typeIntoStep} onDelete={() => setStepDraft((d) => d.slice(0, -1))} />
+              )}
+              <div className="grid grid-cols-3 gap-[0.7rem]">
+                <PanelKey tone="quiet" icon={<ArrowLeft />} onClick={stepBack} disabled={busy}>
+                  Volver
+                </PanelKey>
+                {stepField === "motivo" ? (
+                  <PanelKey icon={<SkipForward />} onClick={() => submitIdentity("motivo", "")} disabled={busy}>
+                    Omitir
+                  </PanelKey>
+                ) : (
+                  <TalkKey listening={isListening} busy={busy} onPress={toggleListening} primary={false} compact />
+                )}
+                <PanelKey tone="call" icon={<Check />} onClick={submitStep} disabled={!!stepProblem || busy}>
+                  Continuar
+                </PanelKey>
+              </div>
+            </>
+          )}
+
+          {(view === "wait" || view === "calling") && (
+            <>
+              <StateTile tone="wait" icon={<Clock />} title={view === "wait" ? "En espera" : "Llamando"} sub={view === "wait" ? "Residente notificado" : `Apto ${calling}`}>
+                {view === "wait" && ownerWait && <Countdown seconds={ownerWait.remaining} />}
+                {config.simulation && <SimTag>{view === "wait" ? "Aviso simulado" : "Llamada simulada"}</SimTag>}
+                {ownerWait?.offline && <p aria-live="polite" className="text-[1.1rem] font-semibold text-no">Sin conexión con el sistema. Seguimos intentando…</p>}
+              </StateTile>
+              {view === "wait" && (
+                <PanelKey tone="quiet" icon={<X />} onClick={handleCancelOwnerWait} className="min-h-[3.6rem] w-full justify-center text-[1.4rem]">
+                  Cancelar solicitud
+                </PanelKey>
+              )}
+            </>
+          )}
+
+          {view === "result" && outcome && (
+            <>
+              {outcome.kind === "ok" && (
+                <StateTile tone="ok" icon={<CheckCircle2 />} title="Autorizado" sub="Pase adelante">
+                  <p className="flex flex-wrap items-center gap-[0.6rem] text-[1.3rem] font-semibold text-ink">
+                    El portón se abre.
+                    {config.simulation && <span className="text-ok"><SimTag>Portón simulado</SimTag></span>}
+                  </p>
+                </StateTile>
+              )}
+              {outcome.kind === "no" && (
+                <StateTile tone="no" icon={<XCircle />} title="No autorizado" sub="Acceso denegado">
+                  <p className="text-[1.3rem] font-semibold leading-snug text-ink">Si cree que es un error, pida ayuda al vigilante de turno.</p>
+                </StateTile>
+              )}
+              {outcome.kind === "error" && (
+                <StateTile tone="off" icon={<WifiOff />} title="Sin conexión" sub="El sistema no respondió">
+                  <p className="text-[1.3rem] font-semibold leading-snug text-ink">Puede intentar de nuevo en un momento.</p>
+                </StateTile>
+              )}
+              {outcome.kind === "info" && (
+                <StateTile tone="wait" icon={<Check />} title="Cancelada" sub="Solicitud cancelada" />
+              )}
+              <PanelKey tone="call" icon={outcome.kind === "ok" || outcome.kind === "info" ? <Check /> : <RotateCcw />} onClick={resetVisit} hint={<span className="tabular-nums">Nueva visita en {resetIn} s</span>} className="min-h-[4.2rem] w-full text-[1.5rem]">
+                {outcome.kind === "ok" || outcome.kind === "info" ? "Terminar" : "Empezar de nuevo"}
+              </PanelKey>
+            </>
+          )}
+
+          {view === "help" && (
+            <PanelKey tone="call" icon={<ArrowLeft />} onClick={() => setScreen("none")} className="min-h-[4.2rem] w-full justify-center text-[1.5rem]">
+              Volver
+            </PanelKey>
+          )}
+
+          {view === "panic-confirm" && (
+            <>
+              <PanelKey tone="alert" icon={<Siren />} onClick={confirmPanic} className="min-h-[4.6rem] w-full text-[1.6rem]">
+                Sí, es una emergencia
+              </PanelKey>
+              <PanelKey tone="quiet" icon={<ArrowLeft />} onClick={() => setScreen("none")} className="min-h-[4rem] w-full text-[1.4rem]">
+                No, volver
+              </PanelKey>
+            </>
+          )}
+
+          {view === "panic" && (
+            <PanelKey tone="quiet" icon={<X />} onClick={() => { window.speechSynthesis.cancel(); setScreen("none"); }} className="min-h-[4.2rem] w-full justify-center text-[1.5rem]">
+              Cerrar alerta
+            </PanelKey>
+          )}
         </div>
-      </footer>
 
-      {qrScannerOpen && (
-        <QrScanner onResult={handleQrResult} onClose={() => setQrScannerOpen(false)} />
+        {/* Fila del marco: invitado, ayuda y emergencia siempre al alcance */}
+        {view !== "help" && view !== "panic" && view !== "panic-confirm" && (
+          <div className={`grid gap-[0.6rem] border-t-[0.12rem] border-key-edge/70 pt-[0.9rem] ${view === "home" ? "grid-cols-3" : "grid-cols-2"}`}>
+            {view === "home" && (
+              <PanelKey tone="quiet" stacked icon={<UserCheck />} onClick={handleStartGuest} disabled={busy || isListening}>
+                Soy invitado
+              </PanelKey>
+            )}
+            <PanelKey tone="quiet" stacked icon={<CircleHelp />} onClick={() => setScreen("help")}>
+              Ayuda
+            </PanelKey>
+            <PanelKey tone="alert" stacked icon={<Siren />} onClick={() => setScreen("panic-confirm")}>
+              Emergencia
+            </PanelKey>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+/* ---------- Piezas ---------- */
+
+// La tecla de llamada: Hablar
+function TalkKey({ listening, busy, onPress, primary, compact }: { listening: boolean; busy: boolean; onPress: () => void; primary: boolean; compact?: boolean }) {
+  const reduced = useReducedMotion();
+  if (listening) {
+    return (
+      <div className={`relative ${compact ? "" : "flex flex-1 flex-col"}`}>
+        <button
+          type="button"
+          onClick={onPress}
+          className={`keycap relative flex w-full items-center justify-center gap-[0.7rem] overflow-hidden rounded-[0.9rem] border-[0.2rem] border-call bg-key font-semibold text-call cursor-pointer ${compact ? "min-h-[3rem] text-[1.1rem]" : "h-full min-h-[6.2rem] text-[1.8rem]"}`}
+        >
+          <motion.span
+            aria-hidden
+            className="absolute inset-y-0 left-0 bg-call/15"
+            initial={{ width: "0%" }}
+            animate={{ width: "100%" }}
+            transition={{ duration: reduced ? 0 : RECORD_LIMIT_MS / 1000, ease: "linear" }}
+          />
+          <Square className="relative h-[1em] w-[1em] fill-current" />
+          <span className="relative">{compact ? "Terminar" : "Escuchando · toque para terminar"}</span>
+        </button>
+        {!compact && <FocusBrackets color="var(--call)" />}
+      </div>
+    );
+  }
+  return (
+    <PanelKey
+      tone={primary ? "call" : "key"}
+      icon={<Mic />}
+      onClick={onPress}
+      disabled={busy}
+      hint={compact ? undefined : busy ? "Un momento…" : "Dígame el apartamento o a quién visita"}
+      className={compact ? "" : "min-h-[6.2rem] w-full flex-1 text-[2.2rem]"}
+    >
+      {compact ? "Dictar" : "Hablar"}
+    </PanelKey>
+  );
+}
+
+// Tecla-indicador del estado: se enciende con el color de la decisión
+// «off»: el sistema no respondió; no es una negativa, así que no usa el rojo de denegado
+function StateTile({ tone, icon, title, sub, children }: { tone: "ok" | "no" | "wait" | "off"; icon: React.ReactNode; title: string; sub: string; children?: React.ReactNode }) {
+  const reduced = useReducedMotion();
+  const toneClass =
+    tone === "ok" ? "border-ok bg-ok-tint text-ok"
+    : tone === "no" ? "border-no bg-no-tint text-no"
+    : tone === "off" ? "border-ink-soft bg-key text-ink"
+    : "border-wait bg-wait-tint text-wait";
+  return (
+    <div className="relative flex flex-1 flex-col">
+      <motion.div
+        initial={reduced ? false : { opacity: 0, scale: 0.96 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        className={`flex flex-1 flex-col justify-center gap-[0.8rem] rounded-[1rem] border-[0.22rem] p-[1.2rem] ${toneClass}`}
+      >
+        <div className="flex items-center gap-[0.9rem]">
+          <span className="[&>svg]:h-[3.2rem] [&>svg]:w-[3.2rem]">{icon}</span>
+          <div>
+            <p className="text-[2.6rem] font-bold uppercase leading-none tracking-[0.01em]">{title}</p>
+            <p className="mt-[0.3rem] text-[1.2rem] font-semibold">{sub}</p>
+          </div>
+        </div>
+        {children}
+      </motion.div>
+      <FocusBrackets color={tone === "off" ? "var(--ink-soft)" : `var(--${tone})`} />
+    </div>
+  );
+}
+
+function Countdown({ seconds }: { seconds: number }) {
+  const m = Math.floor(seconds / 60);
+  const s = String(seconds % 60).padStart(2, "0");
+  return (
+    <p aria-label={`Quedan ${m} minutos y ${s} segundos`} className="text-[5.6rem] font-bold leading-none tracking-[-0.03em] tabular-nums">
+      {m}:{s}
+    </p>
+  );
+}
+
+function AptDisplay({ value }: { value: string }) {
+  return (
+    <div>
+      <div className="flex min-h-[5.4rem] items-end border-b-[0.25rem] border-legend pb-[0.3rem]" aria-label={value ? `Apartamento ${value}` : "Sin marcar"}>
+        <span className="text-[4rem] font-bold leading-none tracking-[0.02em] text-ink">{value}</span>
+        <span aria-hidden className="mb-[0.4rem] ml-[0.2rem] inline-block h-[3.2rem] w-[0.22rem] animate-pulse bg-legend" />
+      </div>
+      <p className="mt-[0.5rem] text-[1.1rem] text-ink-soft">Como aparece en la puerta: por ejemplo 103, PH2 o D-1.</p>
+    </div>
+  );
+}
+
+function StepDisplay({ field, index, total, draft, problem }: { field: LedgerField; index: number; total: number; draft: string; problem: string | null }) {
+  return (
+    <div>
+      <p className="text-[1.4rem] font-semibold text-ink">
+        {stepPrompt[field]}
+        {field === "motivo" && <span className="font-normal text-ink-soft"> Es opcional.</span>}
+        {Math.max(total, index + 1) > 1 && (
+          <span className="ml-[0.6rem] whitespace-nowrap font-normal tabular-nums text-ink-soft">
+            Paso {index + 1} de {Math.max(total, index + 1)}
+          </span>
+        )}
+      </p>
+      <div className="mt-[0.5rem] flex min-h-[3.6rem] items-end border-b-[0.25rem] border-legend pb-[0.2rem]">
+        <span className="break-all text-[2.2rem] font-semibold leading-tight text-ink">{draft}</span>
+        <span aria-hidden className="mb-[0.35rem] ml-[0.15rem] inline-block h-[2rem] w-[0.2rem] animate-pulse bg-legend" />
+      </div>
+      <p aria-live="polite" className="mt-[0.4rem] min-h-[1.5rem] text-[1.1rem] font-semibold text-no">
+        {problem}
+      </p>
+    </div>
+  );
+}
+
+function HelpPanel() {
+  const ways = [
+    { icon: <Mic />, title: "Hable", text: "Toque «Hablar» y diga a qué apartamento va o a quién visita." },
+    { icon: <QrCode />, title: "Muestre su código QR", text: "Si el residente le envió un código, acérquelo a la cámara." },
+    { icon: <Hash />, title: "Marque el apartamento", text: "Use el teclado de la pantalla y toque «Confirmar»." },
+  ];
+  return (
+    <div className="flex flex-col gap-[1rem]">
+      {ways.map((w) => (
+        <div key={w.title} className="flex gap-[0.9rem]">
+          <span className="mt-[0.2rem] text-legend [&>svg]:h-[1.8rem] [&>svg]:w-[1.8rem]">{w.icon}</span>
+          <div>
+            <p className="text-[1.3rem] font-semibold text-ink">{w.title}</p>
+            <p className="text-[1.1rem] leading-snug text-ink-soft">{w.text}</p>
+          </div>
+        </div>
+      ))}
+      <p className="text-[1.1rem] leading-snug text-ink">¿Algo no funciona? Pida ayuda al vigilante de turno. En una emergencia, toque «Emergencia».</p>
+      <p className="text-[1rem] leading-snug text-ink-soft">
+        Privacidad: su voz y la foto de su cédula se procesan en el equipo del condominio. Los datos de su visita quedan registrados en el sistema de administración del condominio.
+      </p>
+    </div>
+  );
+}
+
+function PanicPanel() {
+  return (
+    <div className="relative">
+      <div className="flex flex-col gap-[0.8rem] rounded-[1rem] border-[0.22rem] border-no bg-no-tint p-[1.2rem] text-no">
+        <p className="flex items-center gap-[0.8rem] text-[2.2rem] font-bold uppercase leading-none">
+          <Siren className="h-[2.6rem] w-[2.6rem]" /> Alerta {config.simulation ? "simulada" : "enviada"}
+        </p>
+        {config.simulation ? (
+          <p className="text-[1.4rem] leading-snug text-ink">
+            Este tótem todavía no está conectado a la central de seguridad. <strong>Si es una emergencia real, llame al 911.</strong>
+          </p>
+        ) : (
+          <p className="text-[1.4rem] leading-snug text-ink">El personal de seguridad recibió la alerta. Mantenga la calma.</p>
+        )}
+      </div>
+      <FocusBrackets color="var(--no)" />
+    </div>
+  );
+}
+
+// Solo con ?demo: pruebas y respuesta simulada del propietario
+function DemoTray({ waiting, onTry, onOwner }: { waiting: boolean; onTry: (apt: string, msg: string) => void; onOwner: (d: "aprobada" | "rechazada") => void }) {
+  const chip = "min-h-[2.2rem] rounded-[0.5rem] border-[0.1rem] border-dashed border-ink-soft px-[0.6rem] text-[1rem] font-semibold text-ink cursor-pointer";
+  return (
+    <div className="flex flex-wrap items-center gap-[0.5rem] rounded-[0.6rem] border-[0.1rem] border-dashed border-ink-soft p-[0.5rem]">
+      <span className="px-[0.3rem] text-[1rem] font-bold uppercase tracking-[0.06em] text-ink-soft">Demo</span>
+      <button type="button" className={chip} onClick={() => onTry("3A", "Quiero ir al apartamento 3A")}>
+        Probar 3A
+      </button>
+      <button type="button" className={chip} onClick={() => onTry("1B", "Quiero ver a Carlos Rodríguez")}>
+        Probar 1B
+      </button>
+      {waiting && (
+        <>
+          <button type="button" className={chip} onClick={() => onOwner("aprobada")}>
+            Propietario aprueba
+          </button>
+          <button type="button" className={chip} onClick={() => onOwner("rechazada")}>
+            Propietario rechaza
+          </button>
+        </>
       )}
-
-      {idScannerOpen && (
-        <IdScanner onCapture={handleCedulaCapture} onClose={() => { setIdScannerOpen(false); setIdentity(null); }} />
-      )}
-
     </div>
   );
 }

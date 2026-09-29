@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
-import { X } from "lucide-react";
+import { CameraOff, Hash, X } from "lucide-react";
+import { PanelKey } from "./panel";
 
 interface QrScannerProps {
   onResult: (code: string) => void;
   onClose: () => void;
+  // Alternativa visible si el QR no funciona
+  onFallback: () => void;
 }
 
-export default function QrScanner({ onResult, onClose }: QrScannerProps) {
+// Sin código detectado en este tiempo, se ofrece la alternativa
+const NO_CODE_HINT_MS = 30000;
+
+export default function QrScanner({ onResult, onClose, onFallback }: QrScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -15,11 +21,17 @@ export default function QrScanner({ onResult, onClose }: QrScannerProps) {
   const resolvedRef = useRef<boolean>(false);
   // Referencia siempre-actual al callback para no reiniciar la cámara si cambia
   const onResultRef = useRef(onResult);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     onResultRef.current = onResult;
   });
+
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), NO_CODE_HINT_MS);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +60,8 @@ export default function QrScanner({ onResult, onClose }: QrScannerProps) {
       }
       ctx.drawImage(video, 0, 0, width, height);
       const imageData = ctx.getImageData(0, 0, width, height);
-      const code = jsQR(imageData.data, width, height, { inversionAttempts: "dontInvert" });
+      // attemptBoth: también lee QR invertidos (pantallas en modo oscuro)
+      const code = jsQR(imageData.data, width, height, { inversionAttempts: "attemptBoth" });
       if (code && code.data && !resolvedRef.current) {
         resolvedRef.current = true;
         stopCamera();
@@ -60,7 +73,8 @@ export default function QrScanner({ onResult, onClose }: QrScannerProps) {
 
     (async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setError("Este navegador no permite el acceso a la cámara.");
+        console.error("getUserMedia no disponible (¿contexto seguro? usa localhost o HTTPS)");
+        setError(true);
         return;
       }
       try {
@@ -80,11 +94,7 @@ export default function QrScanner({ onResult, onClose }: QrScannerProps) {
         rafRef.current = requestAnimationFrame(scanFrame);
       } catch (e) {
         console.error("No se pudo acceder a la cámara:", e);
-        if (!cancelled) {
-          setError(
-            "No se pudo acceder a la cámara. Verifique los permisos y que la página use HTTPS o localhost."
-          );
-        }
+        if (!cancelled) setError(true);
       }
     })();
 
@@ -95,39 +105,79 @@ export default function QrScanner({ onResult, onClose }: QrScannerProps) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-md bg-[#0f0f0f] border border-cyan-500/20 rounded-2xl overflow-hidden shadow-2xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-          <span className="text-sm font-mono text-cyan-300 tracking-wider">Escanear código QR</span>
-          <button
-            onClick={onClose}
-            title="Cerrar"
-            className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+    <CameraPage
+      title="Muestre su código QR a la cámara"
+      hint={
+        error
+          ? "La cámara no está disponible en este momento. Marque el apartamento para continuar."
+          : slow
+            ? "Todavía no veo el código. Suba el brillo del teléfono o marque el apartamento."
+            : "Acerque la pantalla de su teléfono al recuadro."
+      }
+      frame="square"
+      error={error}
+      videoRef={videoRef}
+      actions={
+        <>
+          <PanelKey tone={error || slow ? "call" : "key"} icon={<Hash />} onClick={onFallback} className="flex-1">
+            Marcar apartamento
+          </PanelKey>
+          <PanelKey tone="quiet" icon={<X />} onClick={onClose} className="flex-1">
+            Cancelar
+          </PanelKey>
+        </>
+      }
+    >
+      <canvas ref={canvasRef} className="hidden" />
+    </CameraPage>
+  );
+}
 
-        <div className="relative aspect-square bg-black">
+// Página de cámara compartida por el QR y la cédula: la cámara ocupa la hoja del libro
+export function CameraPage({
+  title,
+  hint,
+  frame,
+  error,
+  videoRef,
+  actions,
+  children,
+}: {
+  title: string;
+  hint: string;
+  frame: "square" | "card";
+  error: boolean;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  actions: React.ReactNode;
+  children?: React.ReactNode;
+}) {
+  const corner = "absolute h-[2.2rem] w-[2.2rem] border-legend";
+  return (
+    <div className="brushed absolute inset-0 z-30 flex flex-col p-[1.6rem]">
+      <h2 className="text-[2.4rem] font-bold leading-tight text-ink">{title}</h2>
+      <p aria-live="polite" className="mt-[0.6rem] max-w-[36rem] text-[1.4rem] leading-snug text-ink-soft">
+        {hint}
+      </p>
+      <div className="flex flex-1 items-center justify-center py-[1rem]">
+        <div className={`relative w-full max-w-[32rem] overflow-hidden rounded-[0.3rem] bg-[#0d0f12] ${frame === "square" ? "aspect-square" : "aspect-[4/3]"}`}>
           {error ? (
-            <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-rose-300 text-sm">
-              {error}
+            <div className="flex h-full w-full flex-col items-center justify-center gap-[0.8rem] bg-key text-ink-soft">
+              <CameraOff className="h-[4rem] w-[4rem]" />
+              <span className="text-[1.3rem] font-bold">Cámara no disponible</span>
             </div>
           ) : (
-            <>
-              <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="w-2/3 aspect-square border-2 border-cyan-400/70 rounded-xl shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
-              </div>
-            </>
+            <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
           )}
-          <canvas ref={canvasRef} className="hidden" />
-        </div>
-
-        <div className="px-4 py-3 text-center text-xs text-white/50">
-          {error ? "Cierre e intente de nuevo" : "Coloque el código QR dentro del recuadro"}
+          {!error && <div className={`pointer-events-none absolute ${frame === "square" ? "inset-[14%]" : "inset-x-[10%] inset-y-[18%]"}`}>
+            <span className={`${corner} left-0 top-0 border-l-[0.3rem] border-t-[0.3rem]`} />
+            <span className={`${corner} right-0 top-0 border-r-[0.3rem] border-t-[0.3rem]`} />
+            <span className={`${corner} bottom-0 left-0 border-b-[0.3rem] border-l-[0.3rem]`} />
+            <span className={`${corner} bottom-0 right-0 border-b-[0.3rem] border-r-[0.3rem]`} />
+          </div>}
+          {children}
         </div>
       </div>
+      <div className="flex gap-[0.8rem]">{actions}</div>
     </div>
   );
 }

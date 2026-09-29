@@ -110,7 +110,7 @@ SoftiaGuardAssistant/
 │   ├── app/               # main.py, rag.py, ingest.py, llm.py, prompt.py, schemas.py
 │   ├── data/apartments.json
 │   └── knowledge/*.md     # políticas y procedimientos (corpus RAG)
-└── frontend/              # UI React + Vite + Three.js; proxya /api al backend
+└── frontend/              # UI React + Vite (tótem «Videoportero Soft-IA»); proxya /api al backend
 ```
 
 Detalle del backend y su configuración: [backend/README.md](backend/README.md).

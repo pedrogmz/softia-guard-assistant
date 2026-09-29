@@ -1,7 +1,9 @@
 # Frontend — SoftiaGuard Assistant (Tótem)
 
-Interfaz del tótem de control de acceso: una **SPA en React + Vite + Three.js** que muestra al
-**Vigilante Virtual** (avatar 3D) y permite al visitante interactuar **por voz o texto**. La voz
+Interfaz del tótem de control de acceso: una **SPA en React + Vite** para pantalla táctil
+horizontal o vertical, con la dirección visual **«Videoportero Soft-IA»** (ver `../DESIGN.md`):
+**SoftiaGuard**, submarca de Soft-IA. El **Vigilante Virtual**, un personaje ilustrado con el trazo
+del logo de Soft-IA, atiende al visitante **por voz o por toque**. La voz
 —tanto la síntesis (respuesta hablada) como el reconocimiento (micrófono)— se maneja **en el
 navegador** con la Web Speech API. Toda la lógica de IA vive en el backend local.
 
@@ -11,7 +13,7 @@ navegador** con la Web Speech API. Toda la lógica de IA vive en el backend loca
 ## Stack
 
 - **React 19** + **Vite 6** + **TypeScript**
-- **Three.js** — avatar holográfico (`src/components/VirtualAssistantCanvas.tsx`)
+- **Rubik** autoalojada (`@fontsource-variable/rubik`), sin fuentes remotas
 - **Tailwind CSS v4**, **lucide-react** (iconos), **motion** (animaciones)
 - **Express** (`server.ts`) — sirve la SPA y **proxya `/api` al backend** (en streaming, soporta audio)
 - **`speechSynthesis`** (Web Speech API) — voz de salida (TTS), en el navegador
@@ -56,8 +58,14 @@ Copia `.env.example` a `.env` y ajusta según necesites:
 | Variable | Por defecto | Descripción |
 |---|---|---|
 | `BACKEND_URL` | `http://127.0.0.1:8000` | Destino del proxy `/api` (usa `http://backend:8000` en Docker) |
-| `VITE_BUILDING_NAME` | `Edificio XYZ` | Nombre del edificio mostrado en la UI |
-| `VITE_APP_NAME` | `Asistente de Control de Acceso` | Título de la aplicación |
+| `VITE_BUILDING_NAME` | `Condominio` | Nombre del condominio (contexto en la franja de la pantalla) |
+| `VITE_BUILDING_LOCATION` | — | Ciudad/ubicación bajo el nombre |
+| `VITE_UNIT_NAME` | `Unidad 01` | Unidad del Vigilante Virtual (placa de marca) |
+| `VITE_SIMULATION` | `true` | Marca portón, intercomunicador, alerta y aviso como «simulado» |
+| `VITE_NIGHT_FROM` / `VITE_NIGHT_TO` | `18` / `6` | Horario del tema nocturno |
+
+Parámetros de URL: `?tema=dia|noche` fuerza una iluminación; `?demo` muestra los controles de
+simulación (probar apartamentos, respuesta del propietario). Nunca se muestran al visitante.
 | `PORT` | `3000` | Puerto del servidor del frontend |
 
 ## Scripts
@@ -77,9 +85,13 @@ frontend/
 ├── vite.config.ts     # config de Vite (incluye proxy /api para modo `vite` directo)
 ├── index.html
 └── src/
-    ├── App.tsx        # UI y lógica: chat, teclado, voz (TTS/STT), llamada a /api/verify
+    ├── App.tsx        # pantalla del Vigilante + panel de teclas; lógica: voz (TTS/STT), pasos, espera
+    ├── config.ts      # identidad del condominio y comportamiento (variables VITE_*)
     ├── components/
-    │   └── VirtualAssistantCanvas.tsx   # avatar 3D (Three.js)
+    │   ├── Vigilante.tsx  # personaje SVG con sus expresiones
+    │   ├── panel.tsx      # teclas, corchetes de enfoque, ficha de visita, teclados en pantalla
+    │   ├── QrScanner.tsx  # cámara + jsQR
+    │   └── IdScanner.tsx  # cámara para la cédula
     ├── main.tsx       # punto de entrada de React
     └── index.css      # estilos globales (Tailwind)
 ```

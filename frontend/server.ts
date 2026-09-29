@@ -43,7 +43,7 @@ app.use("/api", async (req, res) => {
     if (["/verify", "/identify", "/access-request"].some((p) => req.url.startsWith(p))) {
       res.status(502).json({
         reply:
-          "Disculpe las molestias, no puedo contactar con el sistema de seguridad en este momento. Por favor, intente de nuevo o presione el Botón de Pánico.",
+          "Disculpe, no puedo contactar con el sistema en este momento. Intente de nuevo en un momento o pida ayuda al vigilante de turno.",
         status: "ERROR",
         apartment: null,
         owner: null,

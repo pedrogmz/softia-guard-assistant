@@ -11,7 +11,7 @@ Navegador (tótem)                    Docker                          Host / Red
 ┌──────────────────────┐     ┌───────────────────────┐      ┌───────────────────────┐
 │ Frontend React       │     │ frontend :3000        │      │ Ollama (nativo, GPU)  │
 │ - UI del tótem       │     │  Express proxy /api ─────────▶│  LLM  qwen2.5:7b      │
-│ - Avatar 3D (Three)  │──/api──▶ backend :8000       │──────▶│  Embeddings bge-m3    │
+│ - UI Libro Visitas   │──/api──▶ backend :8000       │──────▶│  Embeddings bge-m3    │
 │ - TTS speechSynthesis│     │  FastAPI              │ 11434 └───────────────────────┘
 │ - STT MediaRecorder  │     │  - RAG (ChromaDB)     │      ┌───────────────────────┐
 └──────────────────────┘     │  - STT Whisper local  │      │ Soft-IA (REST) ⏳     │
@@ -225,32 +225,59 @@ locales, que ahora reflejan el estado de Soft-IA.
 
 ## 7. Interfaz (UI/UX)
 
-**Layout del tótem** (`frontend/src/App.tsx`): panel del **avatar 3D** con burbuja de diálogo,
-**teclado numérico** de apartamento, **barra de voz + micrófono**, panel de **estado de acceso**
-(portón) y **bitácora de conversación** con entrada de texto. ✅
+> Dirección visual **«Videoportero Soft-IA»** (rediseño 2026-09-29; sustituye a «Libro de Visitas»,
+> descartado): el tótem se presenta como el videoportero moderno del edificio, con la marca
+> **SoftiaGuard (submarca de Soft-IA)**. Contexto de producto en `PRODUCT.md`; decisiones visuales
+> en `DESIGN.md`.
 
-**Escáner de QR** (`frontend/src/components/QrScanner.tsx`): overlay con vista de cámara
-(`getUserMedia` + `MediaStreamTrack`) que decodifica el QR con **jsQR** sobre un `<canvas>` frame a
-frame; al detectar un código llama a `/api/verify-qr` y libera la cámara. Se abre desde el botón de
-QR del tótem o automáticamente cuando `/api/verify` devuelve `action = show_qr_scanner`. Requiere
-**contexto seguro** (`localhost` o HTTPS) para acceder a la cámara. ✅
+**Orientación** ✅: **horizontal primero (1920×1080)** con adaptación a **vertical (1080×1920)**;
+la orientación del hardware aún no está decidida.
 
-**Escáner de cédula** (`frontend/src/components/IdScanner.tsx`): misma cámara que el QR, pero
-**captura un fotograma fijo** y lo envía a `/api/verify-cedula`. Se abre cuando la compuerta pide la
-cédula (`action: show_id_scanner`). El diálogo de datos faltantes vive en `App.tsx`
-(`applyAssistantResponse` maneja `NEED_INFO`; `handleUserInput`/`submitIdentity` reenvían a
-`/api/identify`; botón "Soy invitado" inicia la identificación por voz). ✅
+**Layout del tótem** (`frontend/src/App.tsx`), dentro de un marco de aluminio: ✅
+1. **Pantalla del Vigilante** — el **Vigilante Virtual como personaje ilustrado** con el trazo
+   lineal del logo de Soft-IA, que reacciona a cada estado (atento, escuchando, pensando, hablando,
+   contento, apenado, esperando). Junto a él, su frase en tipografía grande y lo que dijo el
+   visitante. Una franja superior nombra siempre el **paso actual** y muestra condominio y hora.
+2. **Panel de teclas** — placa de marca SoftiaGuard · Soft-IA, rejilla de altavoz y como máximo
+   cuatro teclas grandes: **Hablar** (tecla de llamada naranja, protagonista), **Tengo código QR**,
+   **Marcar apartamento**; en el marco inferior: Soy invitado, Ayuda y Emergencia.
 
-**Espera de la respuesta del propietario** (`action: await_owner`): banner "Esperando respuesta del
-residente…" con **cuenta regresiva** y botón **Cancelar**; el frontend consulta
-`GET /api/access-request/{id}` cada 3 s y aplica la respuesta final (abre el portón o deniega, con
-voz). 🟡
+**Resultados** ✅: la pantalla cambia la expresión del Vigilante y el panel enciende la
+**tecla-indicador** con el color del estado (autorizado, no autorizado, en espera con cuenta
+regresiva grande y Cancelar, sin conexión), con corchetes de enfoque, la ficha de la visita
+(destino · visitante · estado) y el siguiente paso. Reinicio automático tras cada resultado.
 
-**Avatar 3D** (`frontend/src/components/VirtualAssistantCanvas.tsx`): modelo **FBX**
-(`assets/Security_Guard.fbx`) cargado con `FBXLoader`, autoescalado y encuadre de busto. Los
-estados de animación mapean a una **luz de estado** de color + movimiento: `idle` (cian, respira),
-`talking` (ámbar), `scanning` (azul + anillo de escaneo), `success` (verde, saltos), `denied`
-(rojo, vibración). ✅
+**Día y noche** ✅: de día aluminio claro con grabado azul marino; de noche panel azul marino con
+leyendas retroiluminadas en celeste. Por hora (`VITE_NIGHT_FROM`, `VITE_NIGHT_TO`, 18–6);
+`?tema=dia|noche` fuerza una.
+
+**Pendiente de reestilizar** 🟡: teclado de apartamento, pasos de datos, escáneres, ayuda y
+emergencia conservan su lógica (teclado alfanumérico, un dato por paso, pánico con confirmación)
+y se adaptan al nuevo mundo en una segunda ronda.
+
+**Honestidad del estado** ✅: portón, intercomunicador, alerta y aviso al residente llevan la marca
+«simulado»; el pánico pide confirmación; los controles de simulación solo aparecen con **`?demo`**.
+
+**Accesibilidad** ✅: `lang="es"`, región `aria-live`, texto ≥ 24 px en el tótem, contraste alto,
+`prefers-reduced-motion`; el estado nunca se comunica solo con color.
+
+**Escáner de QR** (`frontend/src/components/QrScanner.tsx`): la cámara ocupa la página;
+decodifica el QR con **jsQR** sobre un `<canvas>` frame a frame; al detectar un código llama a
+`/api/verify-qr` y libera la cámara. Alternativa visible «Marcar apartamento» y tiempo límite. Se
+abre desde «Tengo código QR» o cuando `/api/verify` devuelve `action = show_qr_scanner`. Requiere
+**contexto seguro** (`localhost` o HTTPS). ✅
+
+**Escáner de cédula** (`frontend/src/components/IdScanner.tsx`): misma cámara, **captura un
+fotograma fijo** y lo envía a `/api/verify-cedula`. Se abre cuando la compuerta pide la cédula
+(`action: show_id_scanner`); alternativa «Escribir el número». ✅
+
+**Espera de la respuesta del propietario** (`action: await_owner`): tecla-indicador «EN ESPERA», cuenta
+regresiva monumental y **Cancelar**; el frontend consulta `GET /api/access-request/{id}` cada 3 s y
+muestra «sin conexión» si la consulta falla. 🟡 (canal WhatsApp simulado)
+
+> **Avatar 3D retirado.** La spec anterior marcaba ✅ un avatar FBX, pero el código dibujaba un orbe
+> Three.js. En el rediseño el Vigilante es una presencia sobria (firma + indicador de estado); el
+> modelo `assets/Security_Guard.fbx` queda en el repositorio sin uso.
 
 **Ciclo de estados de la interacción por voz** (con feedback en cada fase):
 
@@ -298,7 +325,7 @@ Arranque: `ollama serve` + `ollama pull` de los modelos → `docker compose up -
 | STT (Whisper local) | ✅ | — |
 | TTS (navegador) | ✅ | — |
 | Decisión de acceso (LLM + RAG) | ✅ | — |
-| Avatar 3D e interfaz | ✅ | — |
+| Interfaz del tótem (Videoportero Soft-IA: inicio y resultados, horizontal/vertical, día/noche) | ✅ | 🟡 reestilizar teclado, pasos y escáneres |
 | Datos de residentes y autorizaciones | ✅ sincronización Soft-IA → JSON local (offline-first) | — |
 | Registro de visitas en Soft-IA (auditoría) | ✅ visitas por QR con cola de reintento (RF-14) | ⏳ auditar accesos peatonales por LLM |
 | Escaneo y validación de QR | ✅ cámara (jsQR) + decisión con libro mayor `invitations.json` por `id` | — |

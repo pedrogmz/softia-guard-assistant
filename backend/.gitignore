@@ -16,6 +16,10 @@ data/pending_visitas.json
 # Solicitudes de acceso en curso (WhatsApp vía Soft-IA)
 data/access_requests.json
 
+# Archivos de propietarios y autorizaciones emitidas (RF-15)
+data/apartments.json
+data/invitations.json
+
 # Node (backend Node antiguo, ya obsoleto)
 node_modules/
 dist/

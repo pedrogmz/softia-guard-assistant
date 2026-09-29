@@ -23,12 +23,12 @@ este diagnóstico se derivan los requerimientos siguientes.
 | RF-04 | Identificar el **apartamento/residente** por teclado numérico, número dicho o nombre del propietario. | ✅ |
 | RF-05 | Decidir el acceso aplicando las **políticas del condominio** mediante LLM local + RAG. | ✅ |
 | RF-06 | Devolver una **respuesta estructurada** (estado de acceso, acción del tótem y animación del avatar). | ✅ |
-| RF-07 | Mostrar un **avatar 3D** del vigilante con estados visuales (espera/habla/escanea/éxito/denegado). | ✅ |
+| RF-07 | Mostrar la **presencia del Vigilante** con estados visuales (espera/escucha/procesa/habla/autorizado/denegado) en la UI del tótem. | ✅ (personaje ilustrado con el trazo de Soft-IA; el avatar 3D FBX sigue sin uso) |
 | RF-08 | Dar **feedback de procesamiento** al usuario (escuchando / entendiendo / verificando). | ✅ |
 | RF-09 | Atender **invitados con código QR** pre-aprobados: escaneo real del QR con la cámara del tótem. | ✅ (escaneo real con jsQR; validación local) |
 | RF-10 | **Abrir/cerrar el portón** (acceso peatonal y vehicular) según la decisión. | 🟡 (simulado en el frontend) |
 | RF-11 | **Contactar al residente** por intercomunicador antes de autorizar. | 🟡 (simulado con temporizador) |
-| RF-12 | **Botón de pánico** / alerta de emergencia. | 🟡 (simulado) |
+| RF-12 | **Botón de pánico** / alerta de emergencia, con confirmación y marcado como simulado mientras no haya integración. | 🟡 (simulado) |
 | RF-13 | Consultar **residentes y autorizaciones** desde Soft-IA y mantenerlos en local (sincronización periódica, offline-first). | ✅ (operativa; el bucle automático requiere `SOFTIA_ENABLED=true`) |
 | RF-14 | Registrar la **visita autorizada** (acceso por QR) en Soft-IA para auditoría, offline-first (encola y reintenta si no hay conexión). | ✅ (visitas por QR; requiere `SOFTIA_ENABLED=true`) |
 | RF-15 | Verificar la **validez del QR de invitación** buscando su `id` en el libro mayor de autorizaciones y decidiendo con el **estado real** (`estatus`/`vetado`/vigencia; opcional `idcondominios`). | 🟡 (libro mayor local `invitations.json`; provisto por Soft-IA ⏳) |

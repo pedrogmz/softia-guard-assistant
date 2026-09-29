@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { Camera, X } from "lucide-react";
+import { Camera, Keyboard, X } from "lucide-react";
+import { PanelKey } from "./panel";
+import { CameraPage } from "./QrScanner";
 
 interface IdScannerProps {
   onCapture: (image: Blob) => void;
   onClose: () => void;
+  // Alternativa: escribir el número de cédula en el teclado
+  onType: () => void;
 }
 
 // Cámara para mostrar la cédula: captura un fotograma fijo y lo entrega como imagen (JPEG).
-export default function IdScanner({ onCapture, onClose }: IdScannerProps) {
+export default function IdScanner({ onCapture, onClose, onType }: IdScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const onCaptureRef = useRef(onCapture);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -27,7 +31,8 @@ export default function IdScanner({ onCapture, onClose }: IdScannerProps) {
     };
     (async () => {
       if (!navigator.mediaDevices?.getUserMedia) {
-        setError("Este navegador no permite el acceso a la cámara.");
+        console.error("getUserMedia no disponible (¿contexto seguro? usa localhost o HTTPS)");
+        setError(true);
         return;
       }
       try {
@@ -45,7 +50,7 @@ export default function IdScanner({ onCapture, onClose }: IdScannerProps) {
         setReady(true);
       } catch (e) {
         console.error("No se pudo acceder a la cámara:", e);
-        if (!cancelled) setError("No se pudo acceder a la cámara. Verifique los permisos y que la página use HTTPS o localhost.");
+        if (!cancelled) setError(true);
       }
     })();
     return () => {
@@ -73,48 +78,35 @@ export default function IdScanner({ onCapture, onClose }: IdScannerProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-md bg-[#0f0f0f] border border-cyan-500/20 rounded-2xl overflow-hidden shadow-2xl">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-          <span className="text-sm font-mono text-cyan-300 tracking-wider">Mostrar cédula de identidad</span>
-          <button
-            onClick={onClose}
-            title="Cerrar"
-            className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="relative aspect-[4/3] bg-black">
-          {error ? (
-            <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-rose-300 text-sm">
-              {error}
-            </div>
-          ) : (
-            <>
-              <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <div className="w-4/5 h-3/5 border-2 border-cyan-400/70 rounded-xl" />
-              </div>
-            </>
+    <CameraPage
+      title="Muestre su cédula a la cámara"
+      hint={
+        error
+          ? "La cámara no está disponible en este momento. Puede escribir el número de su cédula."
+          : "Ponga la cédula dentro del recuadro, con la foto hacia la cámara, y toque «Tomar foto»."
+      }
+      frame="card"
+      error={error}
+      videoRef={videoRef}
+      actions={
+        <div className="flex w-full flex-col gap-[0.6rem]">
+          {!error && (
+            <PanelKey tone="call" icon={<Camera />} onClick={capture} disabled={!ready} className="min-h-[4rem] text-[1.4rem]">
+              Tomar foto
+            </PanelKey>
           )}
-          <canvas ref={canvasRef} className="hidden" />
+          <div className="flex gap-[0.8rem]">
+            <PanelKey tone={error ? "call" : "key"} icon={<Keyboard />} onClick={onType} className="flex-1">
+              Escribir el número
+            </PanelKey>
+            <PanelKey tone="quiet" icon={<X />} onClick={onClose} className="flex-1">
+              Cancelar
+            </PanelKey>
+          </div>
         </div>
-
-        <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-xs text-white/50">
-            {error ? "Cierre e intente de nuevo" : "Encuadre la cédula y capture"}
-          </span>
-          <button
-            onClick={capture}
-            disabled={!ready || !!error}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-all"
-          >
-            <Camera className="w-4 h-4" /> Capturar
-          </button>
-        </div>
-      </div>
-    </div>
+      }
+    >
+      <canvas ref={canvasRef} className="hidden" />
+    </CameraPage>
   );
 }
