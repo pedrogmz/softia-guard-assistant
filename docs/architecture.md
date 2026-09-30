@@ -108,8 +108,8 @@ Tótem: banner con cuenta regresiva + Cancelar; GET /api/access-request/{id} cad
   `ACCESS_REQUEST_POLL_MIN_S` s; vence a los `ACCESS_REQUEST_TIMEOUT_S` s (120 por defecto).
 - **Sin cola:** si Soft-IA no está disponible al crear la solicitud, se deniega; una solicitud que
   llega tarde no sirve (a diferencia de RF-14).
-- **Modo simulado** (`SOFTIA_SOLICITUD_MOCK=true`): no se llama a Soft-IA; el botón del propietario se
-  simula con `POST /api/dev/access-request/{id}/respond {"decision": "aprobada"|"rechazada"}`, que
+- **Modo simulado** (`SOFTIA_SOLICITUD_MOCK=true`, para desarrollo sin Soft-IA; en producción `false`):
+  no se llama a Soft-IA; el botón del propietario se simula con `POST /api/dev/access-request/{id}/respond {"decision": "aprobada"|"rechazada"}`, que
   construye localmente la autorización de un día.
 
 ### `POST /api/transcribe` (STT) ✅
@@ -144,10 +144,10 @@ carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
 | POST | `/api/verify-cedula` | OCR de la cédula (imagen) → `{ cedula, match }`. | ✅ |
 | POST | `/api/transcribe` | STT: audio → `{ text }`. | ✅ |
 | GET | `/api/apartments` | Lista de apartamentos (paridad; el frontend no lo usa hoy). | ✅ |
-| POST | `/api/access-request` | Crea una solicitud de acceso (WhatsApp vía Soft-IA) con los datos recogidos → `GateResponse` (`await_owner`). | 🟡 |
-| GET | `/api/access-request/{id}` | Estado de la solicitud (polling) → `GateResponse` (pendiente / aprobada / rechazada / expirada). | 🟡 |
-| DELETE | `/api/access-request/{id}` | El visitante cancela la espera. | 🟡 |
-| POST | `/api/dev/access-request/{id}/respond` | **Solo modo simulado**: simula el botón Aprobar/Rechazar del propietario. | 🟡 |
+| POST | `/api/access-request` | Crea una solicitud de acceso (WhatsApp vía Soft-IA) con los datos recogidos → `GateResponse` (`await_owner`). | ✅ |
+| GET | `/api/access-request/{id}` | Estado de la solicitud (polling) → `GateResponse` (pendiente / aprobada / rechazada / expirada). | ✅ |
+| DELETE | `/api/access-request/{id}` | El visitante cancela la espera. | ✅ |
+| POST | `/api/dev/access-request/{id}/respond` | **Solo modo simulado**: simula el botón Aprobar/Rechazar del propietario. | ✅ (herramienta de desarrollo) |
 | POST | `/api/sync` | Fuerza la sincronización con Soft-IA (además de la periódica). | ✅ |
 | GET | `/health` | Estado y modelos configurados. | ✅ |
 
@@ -207,13 +207,23 @@ autorizaciones **funcionan aunque no haya conexión** a Soft-IA (offline-first, 
   autorizado_por, fecha, telefono}`. Se ejecuta en segundo plano (no bloquea la apertura del
   portón). Offline-first: si falla por **red/5xx** se **encola** en `data/pending_visitas.json` y se
   reintenta en cada sync; un **4xx** (vencida/no existe) se descarta (no se reintenta).
-- **Solicitudes de acceso (RF-21)** ⏳ — contrato **propuesto** a Soft-IA:
-  `POST /api/condominio/{id}/solicitudes-acceso` `{idpropietario, inmueble, nombre, cedula, telefono,
-  motivo, expira_en}` → `{idsolicitud, estatus}`; `GET …/{sol}` → `{estatus, autorizacion?}`;
-  `PATCH …/{sol}` `{estatus:"cancelada"}`. Soft-IA envía el WhatsApp (bot `bas_whatsapp_*`, plantilla
-  con botones) y, al aprobar, crea la autorización de un día en `bas_autorizacionvisitas`, que el
-  tótem copia al libro mayor local. Rutas configurables (`SOFTIA_SOLICITUDES_PATH`,
-  `SOFTIA_SOLICITUD_ITEM_PATH`). Hoy simulado (`SOFTIA_SOLICITUD_MOCK=true`).
+- **Solicitudes de acceso (RF-21)** 🟡 — implementado en Soft-IA y verificado de extremo a extremo
+  (condominio 3304):
+  - `POST /api/condominio/{id}/solicitud_acceso` `{idpropietario, inmueble, nombre, cedula, telefono,
+    motivo, expira_en}` → `{idsolicitud, estatus:"pendiente"}`. `idpropietario` es obligatorio,
+    `motivo` opcional y `expira_en` en **segundos**. La API de Soft-IA guarda la solicitud en
+    `bas_solicitudes_acceso` y delega el envío de la plantilla de WhatsApp (botones Aprobar/Rechazar)
+    al servicio de mensajería de Soft-IA; si el envío falla responde **502** (`error_envio`) y el
+    tótem deniega con «no puedo contactar al residente».
+  - `GET …/{sol}` → `{idsolicitud, estatus, autorizacion?}`. Una pendiente vencida se informa como
+    `expirada` y `error_envio` como `cancelada`; al aprobar incluye la fila de `bas_autorizacionvisitas`
+    (vigencia = hoy), que el tótem copia al libro mayor local. 404 si no existe; un 5xx transitorio no
+    corta la espera (el tótem reintenta).
+  - `PATCH …/{sol}` `{estatus:"cancelada"}` → 409 si ya no está pendiente.
+  - **Pendiente** ⏳: el **webhook** que recibe los botones y crea la autorización (verificado hoy
+    simulando la aprobación en la BD).
+  - Rutas configurables (`SOFTIA_SOLICITUDES_PATH`, `SOFTIA_SOLICITUD_ITEM_PATH`); con
+    `SOFTIA_SOLICITUD_MOCK=false` se usa Soft-IA real.
 - **Ejecución** — tarea en segundo plano en el ciclo de vida de FastAPI (habilitada con
   `SOFTIA_ENABLED`), más `POST /api/sync` para forzar sync + reintento de la cola. También
   `python -m app.sync` (CLI).
@@ -273,7 +283,7 @@ fotograma fijo** y lo envía a `/api/verify-cedula`. Se abre cuando la compuerta
 
 **Espera de la respuesta del propietario** (`action: await_owner`): tecla-indicador «EN ESPERA», cuenta
 regresiva monumental y **Cancelar**; el frontend consulta `GET /api/access-request/{id}` cada 3 s y
-muestra «sin conexión» si la consulta falla. 🟡 (canal WhatsApp simulado)
+muestra «sin conexión» si la consulta falla. ✅
 
 > **Avatar 3D retirado.** La spec anterior marcaba ✅ un avatar FBX, pero el código dibujaba un orbe
 > Three.js. En el rediseño el Vigilante es una presencia sobria (firma + indicador de estado); el
@@ -330,7 +340,7 @@ Arranque: `ollama serve` + `ollama pull` de los modelos → `docker compose up -
 | Registro de visitas en Soft-IA (auditoría) | ✅ visitas por QR con cola de reintento (RF-14) | ⏳ auditar accesos peatonales por LLM |
 | Escaneo y validación de QR | ✅ cámara (jsQR) + decisión con libro mayor `invitations.json` por `id` | — |
 | Recolección de datos faltantes | ✅ diálogo `NEED_INFO` (nombre/cédula/teléfono) + OCR cédula (Tesseract) + PATCH a Soft-IA | ⏳ OCR de cédulas reales robusto |
-| Solicitud de acceso por WhatsApp | 🟡 flujo completo con canal simulado (`SOFTIA_SOLICITUD_MOCK`) | ⏳ endpoint `solicitudes-acceso` + bot de WhatsApp en Soft-IA |
+| Solicitud de acceso por WhatsApp | 🟡 integrado con Soft-IA real: crear, enviar WhatsApp, consultar, vencer y cancelar ✅ | ⏳ webhook de los botones Aprobar/Rechazar en Soft-IA |
 | Portón / intercomunicador / pánico | 🟡 simulados | ⏳ hardware + Soft-IA |
 | Registro de eventos / auditoría | ⏳ | ⏳ Soft-IA |
 | Autenticación / roles | ⏳ | ⏳ |

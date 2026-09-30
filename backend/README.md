@@ -89,8 +89,10 @@ Tests (sin Ollama ni Soft-IA; datos aislados en un directorio temporal):
 
 Si el visitante no tiene autorización vigente, `/api/identify` pasa a modo solicitud
 (`request_mode`), recoge inmueble → nombre → cédula → teléfono → motivo y crea la solicitud.
-Mientras Soft-IA no exponga `solicitudes-acceso`, se usa `SOFTIA_SOLICITUD_MOCK=true` (por
-defecto): el propietario se simula con los botones del banner del tótem o con:
+Con `SOFTIA_SOLICITUD_MOCK=false` (y `SOFTIA_ENABLED=true`) se usa Soft-IA real
+(`/api/condominio/{id}/solicitud_acceso`), que envía el WhatsApp al propietario. Para desarrollar
+sin Soft-IA, `SOFTIA_SOLICITUD_MOCK=true` (por defecto) simula al propietario con los botones del
+banner del tótem o con:
 
 ```bash
 curl -s http://localhost:8000/api/dev/access-requests | jq        # pendientes
