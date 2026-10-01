@@ -74,11 +74,15 @@ def resolve_by_name(
             candidates = by_apt
 
     # Misma persona con una autorización vencida y otra vigente (p. ej. la de un día
-    # creada al aprobar una solicitud): se usa la vigente.
+    # creada al aprobar una solicitud): se usa la vigente. Pero si entre los homónimos
+    # hay alguno vetado o de otro condominio no se elige ninguno automáticamente: un
+    # visitante vetado entraría con la autorización de otra persona.
     if len(candidates) > 1:
-        valid = [r for r in candidates if invitations.check_state(r) == "ok"]
-        if len(valid) == 1:
-            candidates = valid
+        states = [invitations.check_state(r) for r in candidates]
+        if not any(s in ("vetado", "wrong_condominio") for s in states):
+            valid = [r for r, s in zip(candidates, states) if s == "ok"]
+            if len(valid) == 1:
+                candidates = valid
 
     if not candidates:
         return ("not_found", None)

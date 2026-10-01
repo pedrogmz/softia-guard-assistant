@@ -8,11 +8,11 @@ de entrada (STT)** se transcribe aquí con **Whisper local**, así que el audio 
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| POST | `/api/verify` | Verificación de acceso (texto → JSON estructurado con LLM + RAG) |
+| POST | `/api/verify` | Canal de conversación (texto → JSON estructurado con LLM + RAG). Orienta al visitante; **nunca autoriza ni abre el portón** |
 | POST | `/api/verify-qr` | Valida el QR de invitación de Soft-IA: parsea `{ code }`, toma el `id` y decide con el estado real del libro mayor `data/invitations.json` → `VerifyResponse` |
 | POST | `/api/transcribe` | STT: recibe un clip de audio y devuelve `{ text }` (Whisper local) |
 | POST | `/api/identify` | Identifica por nombre + recoge datos faltantes (nombre/cédula/teléfono) → `GateResponse` |
-| POST | `/api/verify-cedula` | OCR local (Tesseract) de la cédula mostrada a la cámara → `{ cedula, match }` |
+| POST | `/api/verify-cedula` | OCR local (Tesseract) de la cédula mostrada a la cámara → `{ cedula, match, cedula_token }` (el comprobante que `/api/identify` exige para completar una autorización) |
 | POST | `/api/access-request` | Solicitud de acceso al propietario por WhatsApp vía Soft-IA (visitante sin autorización) → `GateResponse` (`await_owner`) |
 | GET / DELETE | `/api/access-request/{id}` | Estado de la solicitud (polling del tótem) / cancelarla |
 | GET, POST | `/api/dev/access-requests`, `/api/dev/access-request/{id}/respond` | **Solo simulado**: lista pendientes / simula el botón Aprobar-Rechazar del propietario |

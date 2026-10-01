@@ -17,8 +17,11 @@ leer el código y las decisiones de diseño que se derivan.
 
 ## 2. Defectos de fallo abierto encontrados (FR-010)
 
-Leídos en el código, **aún no reproducidos con una prueba**; cada uno se confirma con una prueba
-que falle antes de corregirlo.
+Leídos en el código durante la planificación. **Estado tras la implementación**: D3, D4, D5
+y D9 se reprodujeron con pruebas que fallaban antes de la corrección; D1, D2 y D8 se
+confirmaron retirando la corrección (la suite falla); D6 y D7 son de frontend y de prompt y se
+verificaron en ejecución. Todos están corregidos. En las rutas de fallo de la historia 1 no
+apareció ningún defecto.
 
 | # | Dónde | Defecto | Requisito |
 |---|---|---|---|

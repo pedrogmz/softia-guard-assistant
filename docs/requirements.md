@@ -21,21 +21,21 @@ este diagnóstico se derivan los requerimientos siguientes.
 | RF-02 | **STT local**: el audio del visitante se transcribe con Whisper en el backend, sin salir a la nube. | ✅ |
 | RF-03 | **TTS**: el asistente responde con voz (síntesis en el navegador). | ✅ |
 | RF-04 | Identificar el **apartamento/residente** por teclado numérico, número dicho o nombre del propietario. | ✅ |
-| RF-05 | Decidir el acceso aplicando las **políticas del condominio** mediante LLM local + RAG. | ✅ |
+| RF-05 | **Orientar al visitante** por voz/texto con LLM local + RAG sobre las políticas del condominio. El canal de conversación **nunca autoriza ni abre el portón**: deriva al visitante a identificarse (QR o nombre) o a la solicitud de acceso; la decisión sale solo del estado real de la autorización (RF-15, RF-19) o de la respuesta del propietario (RF-23). El backend rebaja cualquier «aprobado» del modelo y solo ofrece el escáner de QR si el visitante mencionó un QR. | ✅ (verificado con el modelo local y en el tótem; pruebas automatizadas) |
 | RF-06 | Devolver una **respuesta estructurada** (estado de acceso, acción del tótem y animación del avatar). | ✅ |
 | RF-07 | Mostrar la **presencia del Vigilante** con estados visuales (espera/escucha/procesa/habla/autorizado/denegado) en la UI del tótem. | ✅ (personaje ilustrado con el trazo de Soft-IA; el avatar 3D FBX sigue sin uso) |
 | RF-08 | Dar **feedback de procesamiento** al usuario (escuchando / entendiendo / verificando). | ✅ |
 | RF-09 | Atender **invitados con código QR** pre-aprobados: escaneo real del QR con la cámara del tótem. | ✅ (escaneo real con jsQR; validación local) |
 | RF-10 | **Abrir/cerrar el portón** (acceso peatonal y vehicular) según la decisión. | 🟡 (simulado en el frontend) |
-| RF-11 | **Contactar al residente** por intercomunicador antes de autorizar. | 🟡 (simulado con temporizador) |
+| RF-11 | ~~Contactar al residente por intercomunicador antes de autorizar.~~ **Retirado**: el contacto con el propietario es por WhatsApp (RF-20..23). El intercomunicador simulado se eliminó del tótem y la acción `ring_bell` del backend. | Retirado ✅ |
 | RF-12 | **Botón de pánico** / alerta de emergencia, con confirmación y marcado como simulado mientras no haya integración. | 🟡 (simulado) |
 | RF-13 | Consultar **residentes y autorizaciones** desde Soft-IA y mantenerlos en local (sincronización periódica, offline-first). | ✅ (operativa; el bucle automático requiere `SOFTIA_ENABLED=true`) |
 | RF-14 | Registrar la **visita autorizada** (acceso por QR) en Soft-IA para auditoría, offline-first (encola y reintenta si no hay conexión). | ✅ (visitas por QR; requiere `SOFTIA_ENABLED=true`) |
-| RF-15 | Verificar la **validez del QR de invitación** buscando su `id` en el libro mayor de autorizaciones y decidiendo con el **estado real** (`estatus`/`vetado`/vigencia; opcional `idcondominios`). | 🟡 (libro mayor local `invitations.json`; provisto por Soft-IA ⏳) |
+| RF-15 | Verificar la **validez del QR de invitación** buscando su `id` en el libro mayor de autorizaciones y decidiendo con el **estado real** (`estatus`/`vetado`/vigencia; opcional `idcondominios`). | 🟡 (libro mayor local `invitations.json`; provisto por Soft-IA ⏳). Estado estricto ✅ (pruebas automatizadas): un `vetado` con valor desconocido cuenta como vetado, y una `autorizado_hasta` ausente o mal formada como inactiva (todas las autorizaciones llevan fecha; las permanentes usan una fecha muy lejana) |
 | RF-16 | **Solicitar datos faltantes** {nombre, cédula, teléfono} antes de autorizar (diálogo dirigido por el backend, estado `NEED_INFO`), tanto en la identificación por QR como por voz/nombre. | ✅ |
-| RF-17 | Leer la **cédula mostrada a la cámara** (OCR local Tesseract) y **verificar** que el nombre coincide con la autorización. | ✅ (fiabilidad de OCR limitada; best-effort con reintento) |
+| RF-17 | Leer la **cédula mostrada a la cámara** (OCR local Tesseract) y **verificar** que el nombre coincide con la autorización. | ✅ backend: exige la coincidencia de nombre para completar una autorización (comprobante firmado de la lectura); una cédula sin comprobante se ignora (verificado en ejecución; pruebas automatizadas). La cédula escrita a mano solo se admite en la solicitud de acceso (RF-20). 🟡 tótem: ya no ofrece escribir la cédula al completar una autorización (verificado), pero la denegación tras 3 lecturas fallidas y la lectura con cámara real no se han verificado en ejecución. Fiabilidad de OCR limitada |
 | RF-18 | **Actualizar la autorización** en Soft-IA (PATCH `cedula`/`telefono`) con los datos recogidos, y reflejarlo en el libro mayor local. | ✅ (requiere `SOFTIA_ENABLED=true`) |
-| RF-19 | **Identificar por nombre** una autorización y **desambiguar** homónimos (por cédula, luego apartamento). | ✅ |
+| RF-19 | **Identificar por nombre** una autorización y **desambiguar** homónimos (por cédula, luego apartamento). Si entre los homónimos hay alguno vetado o de otro condominio, no se elige ninguno automáticamente (pruebas automatizadas). | ✅ |
 | RF-20 | **Solicitud de acceso** para visitantes **sin autorización vigente** (inexistente, vencida o inactiva): en lugar de denegar, recoger {inmueble destino, nombre, cédula, teléfono, motivo opcional} y generar una solicitud. Los **vetados** y de **otro condominio** se siguen denegando sin solicitud; los inmuebles con política "No Molestar" también. | ✅ (verificado contra Soft-IA real, condominio 3304) |
 | RF-21 | **Notificar al propietario por WhatsApp vía Soft-IA** con los datos del visitante y botones **Aprobar / Rechazar**. El tótem nunca conoce el teléfono del propietario (Soft-IA lo resuelve por `idpropietario`). | 🟡 (envío del WhatsApp ✅ verificado; recepción de los botones por webhook en Soft-IA ⏳ por desplegar) |
 | RF-22 | **Espera con tiempo límite**: el visitante ve una cuenta regresiva (por defecto 120 s, `ACCESS_REQUEST_TIMEOUT_S`) y puede **cancelar**; si el propietario rechaza o no responde, se deniega con un mensaje amable. | ✅ (vencimiento verificado contra Soft-IA real) |
@@ -52,7 +52,7 @@ este diagnóstico se derivan los requerimientos siguientes.
 | RNF-02 | **Privacidad**: el audio del visitante se procesa localmente y no se envía a terceros. | ✅ |
 | RNF-03 | **Latencia y tiempos de respuesta** dentro de objetivos medibles (ver §7). | ⏳ (a validar) |
 | RNF-04 | **Usabilidad**: interacción natural por voz con retroalimentación continua en cada fase. | ✅ / a validar |
-| RNF-05 | **Degradación grácil / offline-first**: el backend responde aunque falte el índice RAG o falle una etapa; los datos de Soft-IA se guardan en local para verificar accesos **sin conexión**. | ✅ |
+| RNF-05 | **Degradación grácil / offline-first**: el backend responde aunque falte el índice RAG o falle una etapa; los datos de Soft-IA se guardan en local para verificar accesos **sin conexión**. **Fallo cerrado**: ninguna ruta de fallo (modelo, RAG, Soft-IA, STT, OCR, datos locales) termina en acceso autorizado; cubierto por la suite de `backend/tests/` (36 rutas de fallo y de decisión; ver [`specs/001-backend-fail-closed-tests`](../specs/001-backend-fail-closed-tests/contracts/failure-routes.md)). | ✅ |
 | RNF-06 | **Idioma**: español formal (trato de "usted"), respuestas concisas (máx. ~3 frases). | ✅ |
 | RNF-07 | **Seguridad**: `.env` fuera del control de versiones; rotar la `GEMINI_API_KEY` heredada; autenticación/roles a futuro. | 🟡 |
 | RNF-08 | **Portabilidad / despliegue**: contenedores Docker; Ollama nativo en el host para aprovechar GPU/Metal. | ✅ |
@@ -66,7 +66,7 @@ este diagnóstico se derivan los requerimientos siguientes.
 | **Tótem** | Terminal de entrada: pantalla táctil, micrófono, altavoz. | ⏳ (UI lista; hardware físico a proveer) |
 | **Cámara** | Para escaneo de código QR de invitados (y verificación visual). | ⏳ |
 | **Equipo de cómputo** | CPU + **GPU dedicada o Apple Silicon** con RAM suficiente para el LLM 7B (Ollama) y Whisper. | ✅ (entorno de desarrollo) |
-| **Actuadores** | Portón vehicular/peatonal, intercomunicador, cerradura eléctrica. | 🟡 (interfaz simulada; falta puente a hardware) |
+| **Actuadores** | Portón vehicular/peatonal, cerradura eléctrica. | 🟡 (interfaz simulada; falta puente a hardware) |
 | **Red** | LAN estable del tótem al servidor local de Ollama y al servidor de **Soft-IA**. | ⏳ |
 
 ## 5. Requerimientos de software
@@ -127,9 +127,9 @@ Validación mediante **simulacros de acceso controlados**, midiendo:
 solo**: orienta al visitante y lo deriva a identificarse; la decisión sale de la identificación
 por QR o por nombre, o de la respuesta del propietario. Por eso los escenarios autorizados
 tienen más de un turno, y además de la latencia por turno se mide el tiempo total de atención.
-⏳ Este comportamiento se implementa en la feature
-[`001-backend-fail-closed-tests`](../specs/001-backend-fail-closed-tests/spec.md); hasta
-entonces el prototipo aún permite que el modelo apruebe.
+✅ Implementado en la feature
+[`001-backend-fail-closed-tests`](../specs/001-backend-fail-closed-tests/spec.md). Los
+simulacros en sí (medición de tiempos y usabilidad) siguen pendientes ⏳.
 
 | # | Escenario | Recorrido | Resultado esperado |
 |---|---|---|---|
@@ -158,4 +158,9 @@ Sustituyen a la batería anterior (acceso aprobado 2B, denegado 3A, QR 4B, deliv
 | **Webhook de WhatsApp en Soft-IA** | Los endpoints de `solicitud_acceso` (§6) y el envío de la plantilla ya funcionan. Falta **desplegar el webhook** que recibe los botones Aprobar/Rechazar: al aprobar debe crear la autorización de un día en `bas_autorizacionvisitas` y vincularla a la solicitud (`idautorizacionvisitas`). Mientras tanto, la aprobación se prueba actualizando la BD o, sin Soft-IA, con `SOFTIA_SOLICITUD_MOCK=true` + `POST /api/dev/access-request/{id}/respond`. |
 | **Cancelar una solicitud ya vencida** | Al vencer, el tótem envía `PATCH … {estatus:"cancelada"}`; Soft-IA responde **409** porque ya la considera `expirada`. Es inocuo (el tótem solo registra un aviso), pero conviene que Soft-IA responda 200 en ese caso. |
 | **Modo simulado de solicitudes activo por defecto** | `SOFTIA_SOLICITUD_MOCK` vale `true` por defecto y habilita `POST /api/dev/access-request/{id}/respond`, que aprueba una solicitud sin intervención del propietario. **Se conserva a propósito** como vía de prueba cuando WhatsApp u otro servicio externo impida aprobar por el canal real; en un despliegue real debe ponerse en `false`. |
-| **Acciones físicas simuladas** | Portón, intercomunicador y pánico usan `setTimeout`; requieren integración con hardware/Soft-IA. |
+| **Acciones físicas simuladas** | Portón y pánico usan `setTimeout`; requieren integración con hardware/Soft-IA. |
+| **Frontend sin pruebas automatizadas** | El tótem solo tiene comprobación de tipos. La denegación tras 3 lecturas fallidas de cédula (RF-17) vive en el tótem y no está cubierta por pruebas ni verificada con cámara real. |
+| **`auth_id` aportado por el tótem** | `/api/identify` acepta el `auth_id` que envía el cliente para continuar un diálogo; no hay sesión que lo ligue al visitante identificado. |
+| **Aprobación de solicitud sin reevaluar** | Al aprobarse una solicitud de acceso, la autorización que devuelve Soft-IA abre el portón sin volver a pasar por `check_state`. |
+| **Homónimos del mismo inmueble** | Si dos autorizaciones comparten nombre e inmueble y una está vetada, el visitante queda en «faltan datos» sin salida ni remisión al vigilante (no abre). |
+| **Inmuebles con código no numérico en texto libre** | `find_apartment` solo reconoce en la conversación códigos del tipo `2B`; uno como `F-1` solo se identifica por el teclado o por el nombre del propietario. |

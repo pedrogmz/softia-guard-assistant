@@ -70,7 +70,7 @@ el saneamiento (lista blanca):
 | `status` | `action` permitidas |
 |---|---|
 | `IDENTIFYING` | `none`, `collect_info` |
-| `PENDING_CONFIRMATION` | `show_qr_scanner` |
+| `PENDING_CONFIRMATION` | `show_qr_scanner` (solo si el visitante mencionó un QR o una invitación) |
 | `DENIED` | `show_error` |
 | `ERROR` | `show_error` |
 

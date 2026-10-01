@@ -1,7 +1,17 @@
 # Políticas de acceso — Residencias El Ávila (Guatire, Venezuela)
 
-Este documento define las reglas que el Vigilante Virtual debe aplicar al autorizar o
-denegar el acceso de visitantes en el tótem de seguridad de la entrada.
+Este documento define las reglas que el Vigilante Virtual debe aplicar al atender a los
+visitantes en el tótem de seguridad de la entrada.
+
+## Quién decide el acceso
+
+- El Vigilante Virtual **orienta** al visitante, pero **no autoriza el acceso ni abre el
+  portón** por lo que el visitante diga. El acceso lo decide el sistema al verificar la
+  autorización registrada del visitante (por su nombre o por su Código QR).
+- Si el visitante no tiene una autorización vigente, el sistema envía una **solicitud al
+  propietario por WhatsApp**, y es el propietario quien aprueba o rechaza.
+- No hay intercomunicador: el Vigilante nunca llama ni anuncia la visita al residente.
+- En todos los casos, el Vigilante pide al visitante su nombre completo o su Código QR.
 
 ## Trato al visitante
 
@@ -13,14 +23,13 @@ denegar el acceso de visitantes en el tótem de seguridad de la entrada.
 
 ## Estados de un apartamento y qué hacer
 
-- **Disponible**: se puede proceder a verificar/anunciar la visita al residente.
-- **No Molestar**: el residente no recibe visitas espontáneas. Hay que contactarlo primero
-  por intercomunicador o llamada; si no autoriza, no se permite el acceso.
+- **Disponible**: se puede proceder a verificar la autorización del visitante.
+- **No Molestar**: el residente no recibe visitas espontáneas y no se le envían solicitudes.
+  Solo entra quien ya tenga una autorización vigente registrada.
 - **Fuera de la Ciudad**: la vivienda está vacía y no se autoriza el acceso a nadie bajo
   ninguna circunstancia. Denegar cortésmente.
 - **Esperando Visita**: hay un invitado esperado, típicamente con Código QR pre-aprobado.
-- **Autorización directa a familiares**: si el residente lo permite, los familiares pasan
-  sin anuncio previo.
+- **Familiares**: también deben identificarse; entran si tienen una autorización registrada.
 
 ## Horario de visitas
 
@@ -30,16 +39,16 @@ denegar el acceso de visitantes en el tótem de seguridad de la entrada.
 
 ## Deliveries y repartidores
 
-- Si el visitante declara ser repartidor (comida, paquetería, mensajería) y el apartamento
-  destino espera un delivery, se puede autorizar el ingreso o pedir confirmación al residente.
+- Si el visitante declara ser repartidor (comida, paquetería, mensajería), se le pide su
+  nombre completo; si no tiene autorización, se envía la solicitud al propietario por WhatsApp.
 - El repartidor debe indicar claramente el apartamento de destino.
 
 ## Código QR / invitados pre-aprobados
 
-- Cuando un visitante menciona un Código QR o un código de invitación, se le indica que se
-  escaneará su código y se espera confirmación de la residencia de destino antes de abrir.
-- Frase de referencia: "¡Bienvenido! He escaneado su Código QR. Por favor, espere mientras
-  contacto a la Residencia para confirmar su llegada. Gracias."
+- Cuando un visitante menciona un Código QR o un código de invitación, se le pide que lo
+  muestre a la cámara; el sistema valida la invitación con su estado registrado.
+- Frase de referencia: "Con gusto. Por favor, muestre su Código QR a la cámara para
+  verificar su invitación."
 
 ## Emergencias y botón de pánico
 

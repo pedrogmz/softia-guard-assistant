@@ -23,14 +23,15 @@ Navegador (tótem)                    Docker                          Host / Red
 - **Voz de salida (TTS)**: en el navegador (Web Speech API). ✅
 - **Voz de entrada (STT)**: el navegador graba un clip y lo envía a `/api/transcribe`; **Whisper
   local** lo transcribe. El audio no sale a la nube. ✅
-- **Decisión de acceso**: LLM local (Ollama) + RAG (ChromaDB) en `/api/verify`. ✅
+- **Conversación**: LLM local (Ollama) + RAG (ChromaDB) en `/api/verify`; orienta y **no autoriza**. La **decisión de acceso** sale de `/api/verify-qr`, `/api/identify` y la solicitud
+  aprobada por el propietario. ✅
 - **Ollama corre nativo en el host** para usar GPU/Metal (en macOS la GPU no está disponible
   dentro de Docker); los contenedores lo alcanzan vía `host.docker.internal`. ✅
 - **Soft-IA**: sistema externo del condominio, integración REST. ⏳
 
 ## 2. Flujos de datos
 
-### `POST /api/verify` (decisión de acceso) ✅
+### `POST /api/verify` (canal de conversación) ✅
 1. **`find_apartment`** — resolución determinista del apartamento por teclado, patrón `NN[AB]` en
    el mensaje, o nombre del propietario (`backend/app/rag.py`).
 2. **`retrieve_context`** — recuperación semántica de políticas/procedimientos relevantes en
@@ -41,6 +42,13 @@ Navegador (tótem)                    Docker                          Host / Red
    `temperature=0.2`, `num_ctx=4096`).
 5. **Refuerzo** — si se resolvió el apartamento, se completan `apartment`/`owner` con el dato
    autoritativo. Ante error → `ERROR_RESPONSE` de contingencia.
+6. **Guarda de lista blanca** ✅ (`backend/app/conversation.py`) — la respuesta del modelo se
+   lee de forma tolerante y solo pasan estas combinaciones: `IDENTIFYING` con `none` o
+   `collect_info`; `PENDING_CONFIRMATION` con `show_qr_scanner` (solo si el visitante mencionó un
+   QR o una invitación); `DENIED` o `ERROR` con
+   `show_error`. Cualquier otra (incluidos `APPROVED`, `open_gate`, `ring_bell` o valores
+   inexistentes) se **rebaja** a `IDENTIFYING` / `collect_info` con un mensaje fijo que pide el
+   nombre o el QR. Este canal nunca devuelve `APPROVED` ni `open_gate`.
 
 ### `POST /api/verify-qr` (código QR de invitación de Soft-IA) ✅
 El QR lo genera **Soft-IA** y contiene una URL:
@@ -51,7 +59,8 @@ base64 con los datos de la visita, incluido el **`id` de la autorización**. Flu
 3. `backend/app/invitations.py` busca ese `id` en el **libro mayor** `data/invitations.json` (el
    **estado real** de las autorizaciones del condominio) y decide con el registro almacenado:
    `vetado == 0`, `estatus == "activo"`, `autorizado_hasta` vigente y, si se configura
-   `CONDOMINIO_ID`, `idcondominios` correcto.
+   `CONDOMINIO_ID`, `idcondominios` correcto. Estado estricto ✅: un `vetado` con valor
+   desconocido cuenta como vetado; una fecha ausente o mal formada, como inactiva.
 4. Devuelve un `VerifyResponse` (válido → `open_gate`/`success`; no registrado/vetado/inactivo/
    vencido/otro condominio → `DENIED`/`show_error`).
 5. Si se autoriza (y `SOFTIA_ENABLED`), **registra la visita en Soft-IA** en segundo plano
@@ -71,6 +80,10 @@ detecta los faltantes de {nombre, cédula, teléfono} y dirige un diálogo:
    recoge el dato y reenvía a `/api/identify` (acumulando). El **teléfono** se pide por voz/teclado;
    la **cédula** se muestra a la cámara → `/api/verify-cedula` (OCR Tesseract, `app/ocr.py`) que
    extrae el número y **verifica el nombre** (coincidencia difusa) contra la autorización.
+   ✅ Si coincide, devuelve un **comprobante firmado** (`cedula_token`, HMAC con caducidad,
+   `backend/app/cedula_proof.py`) y `/api/identify` solo aplica una cédula a una autorización
+   si llega con un comprobante válido para esa autorización y ese número. La cédula escrita a
+   mano no completa una autorización; solo se admite en la solicitud de acceso.
 3. Con los datos completos → **PATCH a Soft-IA** (`softia.update_autorizacion`, solo campos
    permitidos) + actualización del libro mayor local → `check_state` → APPROVED/DENIED.
 Estados/acciones nuevos: `Status.NEED_INFO`, `Action.collect_info`, `Action.show_id_scanner`;
@@ -138,10 +151,10 @@ carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
 
 | Método | Ruta | Descripción | Estado |
 |---|---|---|---|
-| POST | `/api/verify` | Decisión de acceso (texto → JSON estructurado). | ✅ |
+| POST | `/api/verify` | Canal de conversación (texto → JSON estructurado); orienta, nunca autoriza. | ✅ |
 | POST | `/api/verify-qr` | Valida un código QR de invitación (`{ code }` → `GateResponse`). | ✅ |
 | POST | `/api/identify` | Identifica por nombre + recolección de datos faltantes → `GateResponse`. | ✅ |
-| POST | `/api/verify-cedula` | OCR de la cédula (imagen) → `{ cedula, match }`. | ✅ |
+| POST | `/api/verify-cedula` | OCR de la cédula (imagen) → `{ cedula, match, error, cedula_token }`. | ✅ |
 | POST | `/api/transcribe` | STT: audio → `{ text }`. | ✅ |
 | GET | `/api/apartments` | Lista de apartamentos (paridad; el frontend no lo usa hoy). | ✅ |
 | POST | `/api/access-request` | Crea una solicitud de acceso (WhatsApp vía Soft-IA) con los datos recogidos → `GateResponse` (`await_owner`). | ✅ |
@@ -157,14 +170,16 @@ carga perezosa) → `{ text }`. El modelo se descarga una vez y se cachea.
 **`VerifyResponse`**: `{ reply, apartment?, status, owner?, action, assistant_animation }`.
 
 **`GateResponse`**: `VerifyResponse` + `{ missing?, auth_id?, request_mode?, request_id?, expires_in? }`.
-`IdentifyRequest` acepta además `motivo` y `request_mode`; `AccessRequestCreate` =
+`IdentifyRequest` acepta además `motivo`, `request_mode` y `cedula_token`; `AccessRequestCreate` =
 `{ apartment, nombre, cedula, telefono, motivo? }`.
 
 | Enum | Valores |
 |---|---|
 | `status` | `APPROVED` · `PENDING_CONFIRMATION` · `DENIED` · `IDENTIFYING` · `NEED_INFO` · `ERROR` |
-| `action` | `open_gate` · `ring_bell` · `show_qr_scanner` · `collect_info` · `show_id_scanner` · `await_owner` · `none` · `show_error` |
+| `action` | `open_gate` · `show_qr_scanner` · `collect_info` · `show_id_scanner` · `await_owner` · `none` · `show_error` |
 | `assistant_animation` | `talking` · `scanning` · `idle` · `success` · `denied` |
+
+> `ring_bell` se retira del enum `action` junto con RF-11.
 
 **Proxy**: el frontend llama a `/api/*` (mismo origen); `frontend/server.ts` reenvía en *streaming*
 a `BACKEND_URL` (soporta JSON y audio multipart). En local se usa `127.0.0.1` (no `localhost`, que
@@ -265,7 +280,7 @@ leyendas retroiluminadas en celeste. Por hora (`VITE_NIGHT_FROM`, `VITE_NIGHT_TO
 emergencia conservan su lógica (teclado alfanumérico, un dato por paso, pánico con confirmación)
 y se adaptan al nuevo mundo en una segunda ronda.
 
-**Honestidad del estado** ✅: portón, intercomunicador, alerta y aviso al residente llevan la marca
+**Honestidad del estado** ✅: portón, alerta y aviso al residente llevan la marca
 «simulado»; el pánico pide confirmación; los controles de simulación solo aparecen con **`?demo`**.
 
 **Accesibilidad** ✅: `lang="es"`, región `aria-live`, texto ≥ 24 px en el tótem, contraste alto,
@@ -341,7 +356,7 @@ Arranque: `ollama serve` + `ollama pull` de los modelos → `docker compose up -
 | Escaneo y validación de QR | ✅ cámara (jsQR) + decisión con libro mayor `invitations.json` por `id` | — |
 | Recolección de datos faltantes | ✅ diálogo `NEED_INFO` (nombre/cédula/teléfono) + OCR cédula (Tesseract) + PATCH a Soft-IA | ⏳ OCR de cédulas reales robusto |
 | Solicitud de acceso por WhatsApp | 🟡 integrado con Soft-IA real: crear, enviar WhatsApp, consultar, vencer y cancelar ✅ | ⏳ webhook de los botones Aprobar/Rechazar en Soft-IA |
-| Portón / intercomunicador / pánico | 🟡 simulados | ⏳ hardware + Soft-IA |
+| Portón / pánico | 🟡 simulados | ⏳ hardware + Soft-IA |
 | Registro de eventos / auditoría | ⏳ | ⏳ Soft-IA |
 | Autenticación / roles | ⏳ | ⏳ |
 | Validación (latencia/usabilidad) | ⏳ | ⏳ simulacros |

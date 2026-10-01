@@ -61,7 +61,7 @@ Copia `.env.example` a `.env` y ajusta según necesites:
 | `VITE_BUILDING_NAME` | `Condominio` | Nombre del condominio (contexto en la franja de la pantalla) |
 | `VITE_BUILDING_LOCATION` | — | Ciudad/ubicación bajo el nombre |
 | `VITE_UNIT_NAME` | `Unidad 01` | Unidad del Vigilante Virtual (placa de marca) |
-| `VITE_SIMULATION` | `true` | Marca portón, intercomunicador, alerta y aviso como «simulado» |
+| `VITE_SIMULATION` | `true` | Marca portón, alerta y aviso como «simulado» |
 | `VITE_NIGHT_FROM` / `VITE_NIGHT_TO` | `18` / `6` | Horario del tema nocturno |
 
 Parámetros de URL: `?tema=dia|noche` fuerza una iluminación; `?demo` muestra los controles de
@@ -136,7 +136,7 @@ Feedback por fase (en `src/App.tsx`):
 | **Grabando** (`isListening`) | barra de ondas animada + "Escuchando… Hable ahora" |
 | **Transcribiendo** (`isTranscribing`) | puntos animados + "Entendiendo su mensaje…" |
 | **Verificando** (`isProcessing`) | puntos animados + "Verificando su solicitud…" |
-| **Respondiendo** | respuesta hablada (TTS) y acción del tótem (portón, QR, intercomunicador) |
+| **Respondiendo** | respuesta hablada (TTS) y acción del tótem (portón, QR, datos de la visita) |
 
 Rutas alternas: si escribes en vez de hablar, se salta directo a **Verificando**; si Whisper no
 entiende el audio o hay un error de red, el asistente responde con un mensaje de disculpa (texto

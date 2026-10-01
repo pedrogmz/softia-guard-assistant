@@ -9,7 +9,7 @@ la [constitución](.specify/memory/constitution.md), que prevalece sobre este ar
 
 **SoftiaGuard Assistant** es un asistente de vigilancia virtual de control de acceso para conjuntos residenciales. Atiende al visitante en un tótem de entrada por **voz o
 texto**, decide el acceso con **IA local** (LLM Ollama + RAG) y responde por voz, ejecutando o
-solicitando la acción del tótem (portón, intercomunicador, QR o denegación). Todo el
+solicitando la acción del tótem (portón, solicitud al propietario por WhatsApp, QR o denegación). Todo el
 procesamiento de IA es **local y open-source**, sin nube.
 
 > **Objetivo general:** Diseñar un asistente de vigilancia virtual de control de acceso vehicular

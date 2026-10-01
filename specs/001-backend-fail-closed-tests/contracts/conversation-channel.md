@@ -33,6 +33,9 @@ autorizar el acceso (FR-013) y de ordenar el intercomunicador (FR-014).
 4. Toda respuesta rebajada es `IDENTIFYING` / `collect_info` / `talking`, con un `reply` fijo que
    pide el nombre completo o el código QR, y conserva `apartment` y `owner`.
 5. Ante cualquier excepción se devuelve la respuesta de contingencia: `ERROR` / `show_error`.
+6. `show_qr_scanner` solo se devuelve si el visitante mencionó un código QR o una invitación en
+   este turno o en uno anterior; si no, la respuesta se rebaja. (Añadida durante la verificación
+   en ejecución: sin las salidas retiradas, el modelo pedía el QR a casi todos los visitantes.)
 
 ### Consecuencia para el tótem
 

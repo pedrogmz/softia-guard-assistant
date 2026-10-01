@@ -6,8 +6,9 @@ import { CameraPage } from "./QrScanner";
 interface IdScannerProps {
   onCapture: (image: Blob) => void;
   onClose: () => void;
-  // Alternativa: escribir el número de cédula en el teclado
-  onType: () => void;
+  // Alternativa: escribir el número de cédula en el teclado. Solo se ofrece en la solicitud
+  // de acceso; para completar una autorización el backend exige la lectura por cámara.
+  onType?: () => void;
 }
 
 // Cámara para mostrar la cédula: captura un fotograma fijo y lo entrega como imagen (JPEG).
@@ -82,7 +83,9 @@ export default function IdScanner({ onCapture, onClose, onType }: IdScannerProps
       title="Muestre su cédula a la cámara"
       hint={
         error
-          ? "La cámara no está disponible en este momento. Puede escribir el número de su cédula."
+          ? onType
+            ? "La cámara no está disponible en este momento. Puede escribir el número de su cédula."
+            : "La cámara no está disponible en este momento. Por favor, pida ayuda al vigilante de turno."
           : "Ponga la cédula dentro del recuadro, con la foto hacia la cámara, y toque «Tomar foto»."
       }
       frame="card"
@@ -96,9 +99,11 @@ export default function IdScanner({ onCapture, onClose, onType }: IdScannerProps
             </PanelKey>
           )}
           <div className="flex gap-[0.8rem]">
-            <PanelKey tone={error ? "call" : "key"} icon={<Keyboard />} onClick={onType} className="flex-1">
-              Escribir el número
-            </PanelKey>
+            {onType && (
+              <PanelKey tone={error ? "call" : "key"} icon={<Keyboard />} onClick={onType} className="flex-1">
+                Escribir el número
+              </PanelKey>
+            )}
             <PanelKey tone="quiet" icon={<X />} onClick={onClose} className="flex-1">
               Cancelar
             </PanelKey>
