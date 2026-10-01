@@ -1,19 +1,18 @@
 # Backend local — Vigilante Virtual (LLM + RAG, 100% open-source)
 
-Backend de control de acceso para el tótem de **Residencias El Ávila**. Reemplaza la
-dependencia de Google Gemini por un **modelo de IA local (Ollama)** con **RAG (ChromaDB)**.
-No usa ningún servicio en la nube. La **voz de salida (TTS)** la maneja el navegador; la **voz
+Backend de control de acceso para el tótem. Reemplaza la
+dependencia de servicios en la nube por un **modelo de IA local (Ollama)** con **RAG (ChromaDB)**. La **voz de salida (TTS)** la maneja el navegador; la **voz
 de entrada (STT)** se transcribe aquí con **Whisper local**, así que el audio no sale a Internet.
 
 ## Endpoints
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| POST | `/api/verify` | Verificación de acceso (texto → JSON estructurado con LLM + RAG) |
+| POST | `/api/verify` | Canal de conversación (texto → JSON estructurado con LLM + RAG). Orienta al visitante; **nunca autoriza ni abre el portón** |
 | POST | `/api/verify-qr` | Valida el QR de invitación de Soft-IA: parsea `{ code }`, toma el `id` y decide con el estado real del libro mayor `data/invitations.json` → `VerifyResponse` |
 | POST | `/api/transcribe` | STT: recibe un clip de audio y devuelve `{ text }` (Whisper local) |
 | POST | `/api/identify` | Identifica por nombre + recoge datos faltantes (nombre/cédula/teléfono) → `GateResponse` |
-| POST | `/api/verify-cedula` | OCR local (Tesseract) de la cédula mostrada a la cámara → `{ cedula, match }` |
+| POST | `/api/verify-cedula` | OCR local (Tesseract) de la cédula mostrada a la cámara → `{ cedula, match, cedula_token }` (el comprobante que `/api/identify` exige para completar una autorización) |
 | POST | `/api/access-request` | Solicitud de acceso al propietario por WhatsApp vía Soft-IA (visitante sin autorización) → `GateResponse` (`await_owner`) |
 | GET / DELETE | `/api/access-request/{id}` | Estado de la solicitud (polling del tótem) / cancelarla |
 | GET, POST | `/api/dev/access-requests`, `/api/dev/access-request/{id}/respond` | **Solo simulado**: lista pendientes / simula el botón Aprobar-Rechazar del propietario |
@@ -156,11 +155,6 @@ docker compose exec backend python -m app.sync
 # o vía HTTP
 curl -s -X POST http://localhost:8000/api/sync
 ```
-
-## Seguridad
-
-Los archivos `.env` originales contenían una `GEMINI_API_KEY` real. Al migrar a local ya no se
-usa: **elimínala del repositorio y rótala** en Google AI Studio. `.env` está en `.gitignore`.
 
 ## Estructura
 

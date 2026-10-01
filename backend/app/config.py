@@ -76,6 +76,9 @@ ACCESS_REQUEST_TIMEOUT_S: int = int(os.getenv("ACCESS_REQUEST_TIMEOUT_S", "120")
 ACCESS_REQUEST_POLL_MIN_S: int = int(os.getenv("ACCESS_REQUEST_POLL_MIN_S", "3"))
 ACCESS_REQUESTS_FILE: Path = DATA_DIR / "access_requests.json"
 
+# Validez (s) del comprobante de verificación de cédula (ver app/cedula_proof.py)
+CEDULA_PROOF_TTL_S: int = int(os.getenv("CEDULA_PROOF_TTL_S", "600"))
+
 RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
 PORT: int = int(os.getenv("PORT", "8000"))
 

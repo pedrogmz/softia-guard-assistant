@@ -92,20 +92,30 @@ def _write(items: list) -> None:
     load_invitations.cache_clear()
 
 
+def _not_banned(value) -> bool:
+    """Solo estos valores significan «no vetado»; cualquier otro (incluido uno
+    desconocido) se trata como vetado: ante la duda, no se abre."""
+    return value is None or value is False or (
+        not isinstance(value, bool) and str(value).strip() in ("", "0")
+    )
+
+
 def check_state(record: dict) -> str:
-    """Evalúa el estado real de la autorización almacenada.
+    """Evalúa el estado real de la autorización almacenada. Exige prueba positiva de
+    validez: un veto con valor desconocido cuenta como vetado y una fecha de vigencia
+    ausente o mal formada como inactiva (todas las autorizaciones llevan fecha; las
+    permanentes usan una muy lejana).
     Devuelve: ok | wrong_condominio | vetado | inactivo | expired."""
     if config.CONDOMINIO_ID and str(record.get("idcondominios", "")) != str(config.CONDOMINIO_ID):
         return "wrong_condominio"
-    if record.get("vetado") in (1, "1", True):
+    if not _not_banned(record.get("vetado")):
         return "vetado"
-    if str(record.get("estatus", "")).lower() != "activo":
+    if str(record.get("estatus") or "").lower() != "activo":
         return "inactivo"
-    autorizado_hasta = record.get("autorizado_hasta")
-    if autorizado_hasta:
-        try:
-            if date.today() > date.fromisoformat(str(autorizado_hasta)[:10]):
-                return "expired"
-        except ValueError:
-            pass  # fecha mal formada: se ignora la comprobación de vigencia
+    try:
+        hasta = date.fromisoformat(str(record.get("autorizado_hasta") or "")[:10])
+    except ValueError:
+        return "inactivo"
+    if date.today() > hasta:
+        return "expired"
     return "ok"

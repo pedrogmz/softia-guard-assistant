@@ -20,6 +20,8 @@ interface Identity {
   auth_id: string | null;
   nombre?: string;
   cedula?: string;
+  // Comprobante de /api/verify-cedula: el backend lo exige para completar una autorización
+  cedulaToken?: string;
   telefono?: string;
   apartment?: string;
   motivo?: string;
@@ -37,13 +39,15 @@ interface OwnerWait {
 
 type Outcome = { kind: "ok" | "no" | "error" | "info" };
 type Screen = "none" | "apartment" | "help" | "panic-confirm" | "panic";
-type View = "home" | "apartment" | "step" | "wait" | "calling" | "result" | "help" | "panic-confirm" | "panic";
+type View = "home" | "apartment" | "step" | "wait" | "result" | "help" | "panic-confirm" | "panic";
 
 const FIELD_ORDER: LedgerField[] = ["apartment", "nombre", "cedula", "telefono", "motivo"];
 const RESULT_RESET_S = 15;
 const IDLE_RESET_MS = 60000;
 const RECORD_LIMIT_MS = 10000;
 const APT_MAX = 10;
+// Lecturas fallidas de la cédula antes de denegar y remitir al vigilante de turno
+const CEDULA_MAX_MISSES = 3;
 
 const welcomeLine = () => `${greetingForNow()}. ¿A qué apartamento viene?`;
 
@@ -109,6 +113,8 @@ export default function App() {
   const [stepDraft, setStepDraft] = useState("");
   // La cédula se lee por cámara; si el visitante prefiere, la escribe en el teclado
   const [cedulaTyping, setCedulaTyping] = useState(false);
+  // Lecturas fallidas seguidas de la cédula al completar una autorización
+  const [cedulaMisses, setCedulaMisses] = useState(0);
 
   const [ownerWait, setOwnerWait] = useState<OwnerWait | null>(null);
   const ownerPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -116,9 +122,7 @@ export default function App() {
 
   // Resultado de la visita y acciones simuladas
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [calling, setCalling] = useState<string | null>(null);
   const [resetIn, setResetIn] = useState(0);
-  const callingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // STT local: grabación de audio con MediaRecorder (Whisper corre en el backend)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -139,7 +143,6 @@ export default function App() {
     : screen === "panic-confirm" ? "panic-confirm"
     : screen === "help" ? "help"
     : ownerWait ? "wait"
-    : calling ? "calling"
     : identity?.awaiting && (identity.awaiting !== "cedula" || cedulaTyping) ? "step"
     : screen === "apartment" ? "apartment"
     : outcome ? "result"
@@ -375,16 +378,9 @@ export default function App() {
 
   // Ejecuta la acción del tótem según la decisión
   const handleTotemAction = (data: any) => {
-    if (data.action === "open_gate") {
+    // Abrir exige las dos señales del backend: estado autorizado y acción de portón
+    if (data.status === "APPROVED" && data.action === "open_gate") {
       setOutcome({ kind: "ok" });
-    } else if (data.action === "ring_bell" && data.apartment) {
-      // Intercomunicador simulado: el residente "contesta" a los 4 s
-      setCalling(data.apartment);
-      callingTimerRef.current = setTimeout(() => {
-        setCalling(null);
-        setOutcome({ kind: "ok" });
-        say(`El residente del ${data.apartment} autorizó su visita. Pase adelante.`);
-      }, 4000);
     } else if (data.action === "show_qr_scanner") {
       setQrScannerOpen(true);
     } else if (data.status === "DENIED") {
@@ -461,7 +457,6 @@ export default function App() {
   useEffect(
     () => () => {
       if (ownerPollRef.current) clearInterval(ownerPollRef.current);
-      if (callingTimerRef.current) clearTimeout(callingTimerRef.current);
     },
     []
   );
@@ -471,6 +466,7 @@ export default function App() {
     JSON.stringify({
       nombre: next.nombre,
       cedula: next.cedula,
+      cedula_token: next.cedulaToken,
       telefono: next.telefono,
       apartment: next.apartment,
       auth_id: next.auth_id,
@@ -524,6 +520,27 @@ export default function App() {
     say("Con gusto. Dígame o escriba su nombre completo para buscar su autorización.");
   };
 
+  // Lectura fallida de la cédula. En la solicitud de acceso se puede escribir el número;
+  // para completar una autorización solo vale la lectura por cámara: al tercer intento
+  // fallido se deniega y se remite al vigilante de turno.
+  const retryCedula = (reason: string) => {
+    if (identity?.requestMode) {
+      say(`${reason} Muéstrela de nuevo a la cámara o escriba el número.`);
+      setIdScannerOpen(true);
+      return;
+    }
+    const misses = cedulaMisses + 1;
+    setCedulaMisses(misses);
+    if (misses >= CEDULA_MAX_MISSES) {
+      say("No pude leer su cédula. Por favor, pida ayuda al vigilante de turno.");
+      setIdentity(null);
+      setOutcome({ kind: "no" });
+      return;
+    }
+    say(`${reason} Muéstrela de nuevo a la cámara.`);
+    setIdScannerOpen(true);
+  };
+
   // Resultado del IdScanner: envía la foto de la cédula a OCR y continúa la identificación
   const handleCedulaCapture = async (blob: Blob) => {
     setIdScannerOpen(false);
@@ -537,8 +554,7 @@ export default function App() {
       const data = await res.json();
 
       if (data.error || !data.cedula) {
-        say("No pude leer su cédula con claridad. Muéstrela de nuevo a la cámara o escriba el número.");
-        setIdScannerOpen(true);
+        retryCedula("No pude leer su cédula con claridad.");
         return;
       }
       if (data.match === false) {
@@ -547,7 +563,13 @@ export default function App() {
         setOutcome({ kind: "no" });
         return;
       }
-      const next: Identity = { ...(identity || { auth_id: null }), cedula: String(data.cedula), awaiting: null };
+      setCedulaMisses(0);
+      const next: Identity = {
+        ...(identity || { auth_id: null }),
+        cedula: String(data.cedula),
+        cedulaToken: data.cedula_token || undefined,
+        awaiting: null,
+      };
       setIdentity(next);
       setLedger((prev) => ({ ...prev, cedula: String(data.cedula) }));
       const res2 = await fetch("/api/identify", {
@@ -558,8 +580,7 @@ export default function App() {
       applyAssistantResponse(await res2.json());
     } catch (e) {
       console.error("Cedula OCR failed:", e);
-      say("Disculpe, hubo un problema al leer la cédula. Intente de nuevo o escriba el número.");
-      setIdScannerOpen(true);
+      retryCedula("Disculpe, hubo un problema al leer la cédula.");
     } finally {
       setIsProcessing(false);
     }
@@ -665,14 +686,13 @@ export default function App() {
   const resetVisit = () => {
     window.speechSynthesis.cancel();
     stopOwnerWait();
-    if (callingTimerRef.current) clearTimeout(callingTimerRef.current);
     if (isListening) stopListening();
-    setCalling(null);
     setOutcome(null);
     setIdentity(null);
     setAskedFields([]);
     setStepDraft("");
     setCedulaTyping(false);
+    setCedulaMisses(0);
     setLedger({});
     setApartmentInput("");
     setAptLetters(false);
@@ -721,7 +741,7 @@ export default function App() {
   useEffect(() => {
     const t = setInterval(() => {
       const g = idleGuardRef.current;
-      const held = g.busy || g.isListening || g.view === "wait" || g.view === "calling" || g.view === "panic" || g.view === "result";
+      const held = g.busy || g.isListening || g.view === "wait" || g.view === "panic" || g.view === "result";
       if (!held && (g.view !== "home" || g.dirty) && Date.now() - lastActivityRef.current > IDLE_RESET_MS) {
         lastActivityRef.current = Date.now();
         resetRef.current();
@@ -787,7 +807,6 @@ export default function App() {
     : view === "apartment" ? "Marcar apartamento"
     : view === "step" && stepField ? `Datos de la visita · ${fieldLabel[stepField]}`
     : view === "wait" ? "Esperando al residente"
-    : view === "calling" ? "Llamando al residente"
     : view === "result" && outcome?.kind === "ok" ? "Acceso autorizado"
     : view === "result" && outcome?.kind === "no" ? "Acceso no autorizado"
     : view === "result" && outcome?.kind === "error" ? "Sin conexión"
@@ -801,11 +820,11 @@ export default function App() {
     : view === "result" && outcome?.kind === "no" ? "sad"
     : view === "result" && outcome?.kind === "error" ? "sorry"
     : view === "panic" ? "sad"
-    : view === "wait" || view === "calling" ? "waiting"
+    : view === "wait" ? "waiting"
     : isSpeaking ? "talking"
     : "idle";
 
-  const stateTone = view === "result" && outcome?.kind === "ok" ? "ok" : view === "result" && outcome?.kind === "no" ? "no" : view === "wait" || view === "calling" ? "wait" : null;
+  const stateTone = view === "result" && outcome?.kind === "ok" ? "ok" : view === "result" && outcome?.kind === "no" ? "no" : view === "wait" ? "wait" : null;
   const visitFields: LedgerField[] = ledger.nombre || view === "step" || view === "wait" ? ["apartment", "nombre", "cedula", "telefono", "motivo"] : ["apartment", "nombre"];
 
   const screenTurn = reduced
@@ -878,7 +897,7 @@ export default function App() {
                 {view === "step" && stepField && (
                   <StepDisplay field={stepField} index={stepIndex} total={askedFields.length} draft={stepDraft} problem={stepDraft ? stepProblem : null} />
                 )}
-                {(view === "result" || view === "wait" || view === "calling" || view === "step" || (view === "home" && Object.keys(ledger).length > 0)) && (
+                {(view === "result" || view === "wait" || view === "step" || (view === "home" && Object.keys(ledger).length > 0)) && (
                   <VisitCard values={ledger} fields={visitFields} active={stepField} onlyFilled={view !== "step"} />
                 )}
                 {view === "help" && <HelpPanel />}
@@ -905,7 +924,7 @@ export default function App() {
         {idScannerOpen && (
           <IdScanner
             onCapture={handleCedulaCapture}
-            onType={typeCedulaInstead}
+            onType={identity?.requestMode ? typeCedulaInstead : undefined}
             onClose={() => {
               setIdScannerOpen(false);
               setIdentity(null);
@@ -997,18 +1016,16 @@ export default function App() {
             </>
           )}
 
-          {(view === "wait" || view === "calling") && (
+          {view === "wait" && (
             <>
-              <StateTile tone="wait" icon={<Clock />} title={view === "wait" ? "En espera" : "Llamando"} sub={view === "wait" ? "Residente notificado" : `Apto ${calling}`}>
-                {view === "wait" && ownerWait && <Countdown seconds={ownerWait.remaining} />}
-                {config.simulation && <SimTag>{view === "wait" ? "Aviso simulado" : "Llamada simulada"}</SimTag>}
+              <StateTile tone="wait" icon={<Clock />} title="En espera" sub="Residente notificado">
+                {ownerWait && <Countdown seconds={ownerWait.remaining} />}
+                {config.simulation && <SimTag>Aviso simulado</SimTag>}
                 {ownerWait?.offline && <p aria-live="polite" className="text-[1.1rem] font-semibold text-no">Sin conexión con el sistema. Seguimos intentando…</p>}
               </StateTile>
-              {view === "wait" && (
-                <PanelKey tone="quiet" icon={<X />} onClick={handleCancelOwnerWait} className="min-h-[3.6rem] w-full justify-center text-[1.4rem]">
-                  Cancelar solicitud
-                </PanelKey>
-              )}
+              <PanelKey tone="quiet" icon={<X />} onClick={handleCancelOwnerWait} className="min-h-[3.6rem] w-full justify-center text-[1.4rem]">
+                Cancelar solicitud
+              </PanelKey>
             </>
           )}
 

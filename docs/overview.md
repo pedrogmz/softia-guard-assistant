@@ -14,7 +14,7 @@ criterio del personal.
 **SoftiaGuard Assistant** es un **asistente de vigilancia virtual** que atiende al visitante en un
 tótem de entrada: entiende lo que desea (por voz o texto), verifica contra las políticas y los
 datos del condominio, responde con voz, y ejecuta o solicita la acción correspondiente (abrir el
-portón, llamar al residente, pedir un código QR o negar el acceso). Todo el procesamiento de IA
+portón, consultar al propietario por WhatsApp, pedir un código QR o negar el acceso). Todo el procesamiento de IA
 es **local y open-source**, sin dependencia de servicios en la nube.
 
 > **Nota multi-condominio:** "Condominio Valle Blanco (Valencia)" es el **caso piloto /
@@ -58,14 +58,15 @@ es **local y open-source**, sin dependencia de servicios en la nube.
 - **Reconocimiento automático de placas (ANPR/LPR)**. El acceso vehicular se limita al control
   del portón, sin identificación por cámara de matrículas.
 - Reconocimiento facial o biometría.
-- Domótica/automatización del condominio más allá de portón e intercomunicador.
+- Domótica/automatización del condominio más allá del portón. El intercomunicador queda fuera:
+  el contacto con el propietario es por WhatsApp (RF-20..23).
 
 ## Actores / stakeholders
 
 | Actor | Rol |
 |---|---|
 | **Visitante** | Interactúa con el tótem (voz/texto) para solicitar el acceso. |
-| **Residente** | Propietario/inquilino del apartamento; autoriza o rechaza visitas. Para visitantes sin autorización vigente recibe una **solicitud por WhatsApp (vía Soft-IA)** con botones Aprobar/Rechazar (RF-20…23; hoy simulado). El intercomunicador sigue simulado. |
+| **Residente** | Propietario/inquilino del apartamento; autoriza o rechaza visitas. Para visitantes sin autorización vigente recibe una **solicitud por WhatsApp (vía Soft-IA)** con botones Aprobar/Rechazar (RF-20…23). |
 | **Vigilante** | Personal de seguridad; supervisa, atiende excepciones y el botón de pánico. |
 | **Administración del condominio** | Gestiona residentes, políticas y autorizaciones en **Soft-IA**. |
 | **Soft-IA** | Plataforma de gestión del condominio; fuente de verdad de residentes y autorizaciones (⏳ integración). |
@@ -95,7 +96,7 @@ Pendiente para cumplir el objetivo completo:
 - ✅ **Recolección de datos faltantes** antes de autorizar (RF-16..19): si la autorización está
   incompleta, el asistente pide {nombre, cédula, teléfono}; la cédula se lee por cámara con **OCR
   local (Tesseract)** verificando el nombre, y los datos se actualizan en Soft-IA (PATCH).
-- 🟡 **Acciones físicas** (portón, intercomunicador, botón de pánico) están **simuladas** en el
+- 🟡 **Acciones físicas** (portón, botón de pánico) están **simuladas** en el
   frontend; falta integración con hardware real.
 - ⏳ **Validación** formal de latencia/tiempos de respuesta/usabilidad mediante simulacros.
 - 🟡 **Identidad del condominio como placeholder**: nombre, residentes y políticas son contenido

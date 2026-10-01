@@ -1,5 +1,6 @@
-"""API FastAPI del backend local. Expone el mismo contrato que el frontend ya
-consume (POST /api/verify), pero resuelto con LLM local (Ollama) + RAG (Chroma).
+"""API FastAPI del backend local. El canal de conversación (POST /api/verify) se
+resuelve con LLM local (Ollama) + RAG (Chroma) y solo orienta; la decisión de acceso
+sale de /api/verify-qr, /api/identify y la solicitud aprobada por el propietario.
 No genera audio: la voz (TTS/STT) la maneja el navegador."""
 from __future__ import annotations
 
@@ -12,7 +13,10 @@ from typing import Optional
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import access, access_requests, config, events, invitations, llm, ocr, prompt, qr, rag, softia, stt, sync
+from . import (
+    access, access_requests, cedula_proof, config, conversation, events, invitations, llm, ocr,
+    prompt, qr, rag, softia, stt, sync,
+)
 from .schemas import (
     AccessRequestCreate,
     Action,
@@ -253,9 +257,13 @@ async def identify(request: IdentifyRequest, background_tasks: BackgroundTasks) 
                 return _need_info_response(None, ["apartment"])
             record = result
 
-        # 2. Aplicar los datos aportados: libro mayor local (inmediato) + Soft-IA (best-effort)
+        # 2. Aplicar los datos aportados: libro mayor local (inmediato) + Soft-IA (best-effort).
+        # La cédula solo cuenta con el comprobante de /api/verify-cedula (nombre coincidente)
+        # para esta autorización; sin él se ignora y se volverá a pedir a la cámara.
         provided = {}
-        if not access._is_empty(request.cedula):
+        if not access._is_empty(request.cedula) and cedula_proof.is_valid(
+            request.cedula_token, str(record.get("id")), request.cedula
+        ):
             provided["cedula"] = str(request.cedula).strip()
         if not access._is_empty(request.telefono):
             provided["telefono"] = str(request.telefono).strip()
@@ -434,19 +442,22 @@ def dev_owner_responds(request_id: str, body: OwnerDecision) -> dict:
 @app.post("/api/verify-cedula")
 async def verify_cedula(file: UploadFile = File(...), auth_id: str = Form("")) -> dict:
     """OCR local de la cédula mostrada a la cámara. Devuelve el número detectado y si
-    el nombre reconocido coincide con la autorización (si se pasa `auth_id`)."""
+    el nombre reconocido coincide con la autorización (si se pasa `auth_id`). Cuando
+    coincide, entrega el comprobante que `/api/identify` exige para aplicar la cédula."""
     try:
         image_bytes = await file.read()
         result = ocr.extract_cedula(image_bytes)
+        cedula = result.get("cedula")
         match = None
         if auth_id and not result.get("error"):
             record = invitations.find_authorization(auth_id)
             if record and record.get("nombre"):
                 match = access.name_matches(record["nombre"], result.get("text", ""))
-        return {"cedula": result.get("cedula"), "match": match, "error": result.get("error")}
+        token = cedula_proof.issue(auth_id, cedula) if (auth_id and cedula and match is True) else None
+        return {"cedula": cedula, "match": match, "error": result.get("error"), "cedula_token": token}
     except Exception as exc:  # noqa: BLE001
         logger.exception("Fallo en /api/verify-cedula: %s", exc)
-        return {"cedula": None, "match": None, "error": "ocr_failed"}
+        return {"cedula": None, "match": None, "error": "ocr_failed", "cedula_token": None}
 
 
 @app.post("/api/transcribe")
@@ -483,7 +494,10 @@ def verify(request: VerifyRequest) -> VerifyResponse:
             result.apartment = result.apartment or apartment["apt"]
             result.owner = result.owner or apartment["owner"]
 
-        return result
+        # 6) Lista blanca: el modelo orienta, nunca autoriza ni abre el portón. El escáner
+        # de QR solo se ofrece si el visitante habló de un QR o de una invitación.
+        said = [request.message] + [h.text for h in request.history if h.role != "assistant"]
+        return conversation.sanitize(result, allow_qr=conversation.mentions_qr(said))
 
     except Exception as exc:  # noqa: BLE001 - degradar con gracia ante fallo del LLM/RAG
         logger.exception("Fallo en /api/verify: %s", exc)

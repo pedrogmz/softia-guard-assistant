@@ -3,9 +3,10 @@
 Interfaz del tótem de control de acceso: una **SPA en React + Vite** para pantalla táctil
 horizontal o vertical, con la dirección visual **«Videoportero Soft-IA»** (ver `../DESIGN.md`):
 **SoftiaGuard**, submarca de Soft-IA. El **Vigilante Virtual**, un personaje ilustrado con el trazo
-del logo de Soft-IA, atiende al visitante **por voz o por toque**. La voz
-—tanto la síntesis (respuesta hablada) como el reconocimiento (micrófono)— se maneja **en el
-navegador** con la Web Speech API. Toda la lógica de IA vive en el backend local.
+del logo de Soft-IA, atiende al visitante **por voz o por toque**. La respuesta hablada (TTS) se
+sintetiza **en el navegador** (`speechSynthesis`); el reconocimiento de voz (STT) ya no usa la Web
+Speech API: el navegador solo graba el clip del micrófono y lo transcribe **Whisper local** en el
+backend. Toda la lógica de IA vive en el backend local.
 
 > Parte del proyecto **SoftiaGuard Assistant**. Para levantar el stack completo (frontend +
 > backend + Ollama), consulta el [README principal](../README.md).
@@ -16,7 +17,7 @@ navegador** con la Web Speech API. Toda la lógica de IA vive en el backend loca
 - **Rubik** autoalojada (`@fontsource-variable/rubik`), sin fuentes remotas
 - **Tailwind CSS v4**, **lucide-react** (iconos), **motion** (animaciones)
 - **Express** (`server.ts`) — sirve la SPA y **proxya `/api` al backend** (en streaming, soporta audio)
-- **`speechSynthesis`** (Web Speech API) — voz de salida (TTS), en el navegador
+- **`speechSynthesis`** — voz de salida (TTS), en el navegador
 - **`MediaRecorder` + `getUserMedia`** — graba el audio del micrófono y lo envía a
   `/api/transcribe`; el reconocimiento (STT) ocurre en el backend con **Whisper local**
 
@@ -43,8 +44,7 @@ npm install
 npm run dev          # arranca en http://localhost:3000
 ```
 
-Abre **http://localhost:3000**. No se necesita ninguna API key (el backend anterior basado en
-Gemini fue reemplazado por IA local).
+Abre **http://localhost:3000**.
 
 ### Con Docker
 
@@ -61,7 +61,7 @@ Copia `.env.example` a `.env` y ajusta según necesites:
 | `VITE_BUILDING_NAME` | `Condominio` | Nombre del condominio (contexto en la franja de la pantalla) |
 | `VITE_BUILDING_LOCATION` | — | Ciudad/ubicación bajo el nombre |
 | `VITE_UNIT_NAME` | `Unidad 01` | Unidad del Vigilante Virtual (placa de marca) |
-| `VITE_SIMULATION` | `true` | Marca portón, intercomunicador, alerta y aviso como «simulado» |
+| `VITE_SIMULATION` | `true` | Marca portón, alerta y aviso como «simulado» |
 | `VITE_NIGHT_FROM` / `VITE_NIGHT_TO` | `18` / `6` | Horario del tema nocturno |
 
 Parámetros de URL: `?tema=dia|noche` fuerza una iluminación; `?demo` muestra los controles de
@@ -136,7 +136,7 @@ Feedback por fase (en `src/App.tsx`):
 | **Grabando** (`isListening`) | barra de ondas animada + "Escuchando… Hable ahora" |
 | **Transcribiendo** (`isTranscribing`) | puntos animados + "Entendiendo su mensaje…" |
 | **Verificando** (`isProcessing`) | puntos animados + "Verificando su solicitud…" |
-| **Respondiendo** | respuesta hablada (TTS) y acción del tótem (portón, QR, intercomunicador) |
+| **Respondiendo** | respuesta hablada (TTS) y acción del tótem (portón, QR, datos de la visita) |
 
 Rutas alternas: si escribes en vez de hablar, se salta directo a **Verificando**; si Whisper no
 entiende el audio o hay un error de red, el asistente responde con un mensaje de disculpa (texto
