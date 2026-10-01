@@ -31,7 +31,7 @@ cd backend && for i in $(seq 10); do .venv/bin/python -m pytest -q -p no:cachepr
 cd backend && grep -rhoE '\b(R[0-9]{2}|US[12]-AS[0-9]+)\b' tests | sort -u
 ```
 
-**Esperado**: aparecen `R01`…`R35` de [contracts/failure-routes.md](contracts/failure-routes.md)
+**Esperado**: aparecen `R01`…`R36` de [contracts/failure-routes.md](contracts/failure-routes.md)
 y los 22 escenarios `US1-AS1`…`US1-AS7`, `US2-AS1`…`US2-AS15`. Los cubiertos por pruebas
 previas se citan en un comentario de la suite nueva.
 

@@ -141,8 +141,10 @@ comprueba la decisión esperada para cada una, por QR y por nombre.
 - La autorización vence **hoy**: sigue vigente durante el día de vencimiento y deja de estarlo al
   día siguiente.
 - Veto y vigencia a la vez: el veto prevalece sobre cualquier otro dato favorable.
-- Dos autorizaciones con el mismo nombre, una válida y otra vetada: no se autoriza sin resolver
-  antes cuál corresponde al visitante.
+- Varias autorizaciones con el mismo nombre: si entre ellas hay alguna vetada o de otro
+  condominio, no se elige ninguna automáticamente y se pide desambiguar (cédula o inmueble);
+  mientras no quede una sola, no se autoriza. Solo cuando las demás están vencidas o inactivas
+  se usa la vigente.
 - Campos de estado ausentes o con valores desconocidos en una autorización: se trata como no
   válida.
 - Dos fallos simultáneos (por ejemplo, modelo de lenguaje y Soft-IA caídos): sigue sin
@@ -152,7 +154,7 @@ comprueba la decisión esperada para cada una, por QR y por nombre.
   ceda, el portón no se abre.
 - Una verificación de cédula hecha para una autorización se intenta usar para otra, o después
   de caducar: no se acepta.
-- El OCR falla varias veces seguidas al completar una autorización: se deniega y se remite al
+- El OCR falla 3 veces seguidas al completar una autorización: se deniega y se remite al
   vigilante de turno; no se ofrece escribir el número.
 - QR vacío, ilegible o con un identificador de formato inválido.
 - El fallo ocurre **después** de decidir autorizar (por ejemplo, al registrar la visita): la
@@ -198,7 +200,7 @@ comprueba la decisión esperada para cada una, por QR y por nombre.
   MUST aceptar solo una cédula leída por cámara cuyo nombre coincida con el de la autorización,
   y MUST poder comprobar por sí mismo que esa verificación ocurrió, sin fiarse de lo que declare
   el tótem. Una cédula sin esa verificación MUST ignorarse. En la solicitud de acceso al
-  propietario la cédula escrita a mano MUST seguir aceptándose. Tras varios intentos fallidos de
+  propietario la cédula escrita a mano MUST seguir aceptándose. Tras 3 intentos fallidos de
   lectura, el tótem MUST denegar y remitir al vigilante de turno.
 - **FR-011**: Cada prueba MUST poder asociarse al escenario de aceptación o caso límite de esta
   spec que comprueba.

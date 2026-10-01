@@ -34,6 +34,14 @@ vigente.
 | inexistente (`not_found`) | `DENIED` | `NEED_INFO` (modo solicitud) | Sí |
 | QR ilegible (`invalid_format`) | `DENIED` | — | No |
 
+## Resolución por nombre (`resolve_by_name`)
+
+Tras desambiguar por cédula y por inmueble, si quedan varias candidatas con el mismo nombre:
+
+- Si alguna está `vetado` o es `wrong_condominio` → `ambiguous`: se pide el inmueble y **no se
+  autoriza** mientras no quede una sola.
+- Si las demás están `expired` o `inactivo` y exactamente una es `ok` → se usa la vigente.
+
 ## Decisión de acceso (`VerifyResponse` / `GateResponse`)
 
 - **Señales de autorización**: `status == "APPROVED"` y `action == "open_gate"`. Una respuesta
@@ -55,7 +63,9 @@ vigente.
 
 ## Respuesta del canal de conversación (`/api/verify`)
 
-Combinaciones permitidas tras el saneamiento (lista blanca):
+La respuesta del modelo se lee de forma tolerante (`status` y `action` como texto) antes del
+saneamiento; solo un JSON ilegible o sin `reply` produce `ERROR`. Combinaciones permitidas tras
+el saneamiento (lista blanca):
 
 | `status` | `action` permitidas |
 |---|---|
@@ -64,7 +74,8 @@ Combinaciones permitidas tras el saneamiento (lista blanca):
 | `DENIED` | `show_error` |
 | `ERROR` | `show_error` |
 
-Cualquier otra combinación que devuelva el modelo se **rebaja** a `IDENTIFYING` /
+Cualquier otra combinación que devuelva el modelo, incluidos valores que no existen en el
+esquema (`ring_bell`), se **rebaja** a `IDENTIFYING` /
 `collect_info` / `talking`, con un mensaje fijo que pide identificarse por nombre o QR. Se
 conservan `apartment` y `owner`.
 

@@ -9,13 +9,13 @@ la respuesta es una decisión de acceso (FR-003, FR-004).
 | ID | Fallo provocado | Resultado esperado | Escenario |
 |---|---|---|---|
 | R01 | El modelo de lenguaje no responde (error de conexión) | `ERROR` / `show_error` | US1-AS1 |
-| R02 | El modelo devuelve JSON inválido o con campos fuera del esquema | `ERROR` / `show_error` | US1-AS2 |
-| R03 | Base de conocimiento ausente (sin contexto) y el modelo aprueba | Rebajada a `IDENTIFYING` | US1-AS3 |
+| R02 | El modelo devuelve JSON ilegible o sin `reply` | `ERROR` / `show_error` | US1-AS2 |
+| R03 | Base de conocimiento ausente (sin contexto) y el modelo aprueba | Rebajada a `IDENTIFYING` | US2-AS9 (US1-AS3 lo cubre R04) |
 | R04 | La consulta a la base de conocimiento lanza una excepción | No autoriza | US1-AS3 |
 | R05 | `apartments.json` ausente o dañado | `ERROR` / `show_error` | US1-AS6 |
 | R06 | El modelo responde `APPROVED` / `open_gate` | Rebajada a `IDENTIFYING` / `collect_info` | US2-AS9 |
 | R07 | El modelo responde `open_gate` con un `status` distinto de `APPROVED` | Rebajada | US2-AS9 |
-| R08 | El modelo responde `ring_bell` | `ERROR` (valor fuera del esquema); nunca `ring_bell` | US2-AS11 |
+| R08 | El modelo responde `ring_bell` o un valor inexistente | Rebajada a `IDENTIFYING` / `collect_info` | US2-AS11 |
 | R09 | El modelo responde `await_owner` o `show_id_scanner` | Rebajada | US2-AS9 |
 | R10 | Mensaje del visitante con instrucciones para el modelo, y el modelo cede | Rebajada | US2-AS8, caso límite |
 
@@ -39,6 +39,7 @@ la respuesta es una decisión de acceso (FR-003, FR-004).
 | R19 | Soft-IA falla al actualizar los datos de una autorización **vetada** | `DENIED` | US1-AS4 |
 | R20 | Excepción inesperada al resolver el nombre | `ERROR` / `show_error` | US1-AS7 |
 | R21 | `auth_id` inexistente | `DENIED` (`not_found`) | US2-AS5 |
+| R36 | Homónimos, uno válido y uno vetado, identificados solo por nombre | `NEED_INFO` (pide inmueble); nunca `APPROVED` | caso límite |
 
 ## Solicitud de acceso — `/api/access-request`
 

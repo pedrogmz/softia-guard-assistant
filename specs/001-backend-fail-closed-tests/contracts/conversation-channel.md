@@ -26,7 +26,8 @@ autorizar el acceso (FR-013) y de ordenar el intercomunicador (FR-014).
 
 1. `status` nunca es `APPROVED` y `action` nunca es `open_gate`, sea cual sea la respuesta del
    modelo de lenguaje.
-2. `action` nunca es `ring_bell` (el valor deja de existir), `await_owner` ni `show_id_scanner`.
+2. `action` nunca es `ring_bell` (el valor deja de existir), `await_owner` ni `show_id_scanner`;
+   si el modelo emite cualquiera de ellos, la respuesta se rebaja.
 3. Solo se devuelven las combinaciones de la lista blanca de
    [data-model.md](../data-model.md#respuesta-del-canal-de-conversación-apiverify).
 4. Toda respuesta rebajada es `IDENTIFYING` / `collect_info` / `talking`, con un `reply` fijo que

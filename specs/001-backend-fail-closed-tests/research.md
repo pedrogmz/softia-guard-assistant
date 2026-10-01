@@ -30,6 +30,7 @@ que falle antes de corregirlo.
 | D6 | `frontend/src/App.tsx:378` | El tótem abre con `action == "open_gate"` aunque `status` no sea `APPROVED`. | FR-003 (defensa en profundidad) |
 | D8 | `backend/app/main.py` `identify()` | Acepta cualquier `cedula` que envíe el tótem para completar una autorización; la coincidencia de nombre (RF-17) solo la comprueba el tótem, y el número puede escribirse a mano. | FR-015 |
 | D7 | `backend/app/prompt.py`, `backend/knowledge/*.md` | El prompt y las políticas indican al modelo aprobar y llamar por intercomunicador. | FR-013, FR-014 |
+| D9 | `backend/app/access.py` `resolve_by_name()` | Con varios homónimos elige automáticamente el único válido, aunque otro esté vetado: un visitante vetado puede entrar con la autorización de un homónimo. | caso límite «homónimos» |
 
 ## 3. Decisiones
 
@@ -41,6 +42,11 @@ que falle antes de corregirlo.
   `show_error`. Cualquier otra combinación se rebaja a `IDENTIFYING` / `collect_info` /
   `talking` con un mensaje fijo que pide identificarse (nombre o QR). Vive en un módulo propio
   (`backend/app/conversation.py`) para probarla sin HTTP.
+- **Lectura tolerante**: la guarda recibe la respuesta del modelo leída de forma tolerante
+  (`status` y `action` como texto libre). Todo valor fuera de la lista blanca, incluidos los que
+  no existen en el esquema (`ring_bell`, valores inventados), se rebaja. `ERROR` queda solo para
+  JSON ilegible o sin `reply`. Además, el esquema que se pasa a Ollama se restringe a los valores
+  de la lista blanca.
 - **Razón**: una lista blanca falla cerrado ante valores nuevos del enum; una lista negra
   (`APPROVED`, `ring_bell`) dejaría pasar el siguiente valor que se añada. El mensaje fijo evita
   repetir un «pase adelante» redactado por el modelo.
@@ -53,8 +59,8 @@ que falle antes de corregirlo.
 - **Decisión**: eliminar `ring_bell` del enum `Action`, del prompt, de `knowledge/` y del
   frontend (rama `ring_bell`, estado `calling`, vista «Llamando»).
 - **Razón**: RF-11 queda retirado; el contacto con el propietario es por WhatsApp (RF-20..23).
-  Al salir del enum, un modelo que lo emita produce un error de validación y, por tanto,
-  `ERROR_RESPONSE`.
+  Al salir del enum, el backend no puede emitirlo; si el modelo lo emite, la guarda lo rebaja
+  (§3.1).
 - **Alternativa descartada**: dejar el valor y solo filtrarlo; mantiene código muerto que
   autoriza sin respuesta real.
 
@@ -119,6 +125,18 @@ que falle antes de corregirlo.
 - **Alternativas descartadas**: (a) guardar las verificaciones en memoria o en un archivo:
   añade estado y limpieza para lo mismo; (b) enviar la foto otra vez a `/api/identify`: duplica
   el OCR, la etapa más lenta y menos fiable.
+
+### 3.8 Homónimos con una autorización vetada (D9)
+
+- **Decisión**: `resolve_by_name()` solo prefiere la única candidata vigente cuando ninguna otra
+  candidata está vetada ni es de otro condominio (es decir, las demás están vencidas o
+  inactivas). Si alguna lo está, devuelve `ambiguous` y se pide desambiguar por cédula o
+  inmueble; mientras no quede una sola candidata, no se autoriza.
+- **Razón**: conserva el caso legítimo que ya cubre `test_expired_visitor_reuses_data` (la misma
+  persona con una autorización vencida y otra de un día) y cierra el caso en que un visitante
+  vetado entra con la autorización de un homónimo.
+- **Límite conocido**: dos homónimos del mismo inmueble sin cédula que los distinga se quedan en
+  `NEED_INFO`; no se abre, pero tampoco se les remite al vigilante.
 
 ## 4. Fuera de alcance (observado, no se corrige aquí)
 

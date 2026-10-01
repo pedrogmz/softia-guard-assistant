@@ -9,9 +9,9 @@
 
 Convertir en pruebas automatizadas dos promesas de la constitución: ningún fallo abre el portón
 (principio IV) y el acceso se decide con el estado real de la autorización (principio V). La
-suite cubre un catálogo de 35 rutas y los 22 escenarios de la spec, sin red.
+suite cubre un catálogo de 36 rutas y los 22 escenarios de la spec, sin red.
 
-Al leer el código aparecieron ocho defectos de fallo abierto ([research.md](research.md) §2).
+Al leer el código aparecieron nueve defectos de fallo abierto ([research.md](research.md) §2).
 Los principales: el canal de conversación devuelve tal cual lo que decide el modelo de lenguaje
 (puede aprobar o «llamar al residente», que el tótem convierte en acceso a los 4 s);
 `check_state()` da por vigente una autorización con fecha mal formada o un veto con valor
@@ -43,8 +43,8 @@ httpx 0.28.1; React 19 + Vite 6. No se añaden dependencias.
 **Constraints**: pruebas deterministas, sin red ni servicios externos, sin datos personales
 reales; ninguna ruta de fallo puede terminar en acceso autorizado
 
-**Scale/Scope**: 35 rutas, 22 escenarios de aceptación, unas 60–70 pruebas nuevas;
-6 módulos de backend, 1 archivo de frontend, 2 documentos de `knowledge/` y la spec en `docs/`
+**Scale/Scope**: 36 rutas, 22 escenarios de aceptación, unas 60–70 pruebas nuevas;
+8 módulos de backend, 1 archivo de frontend, 2 documentos de `knowledge/` y la spec en `docs/`
 
 ## Constitution Check
 
@@ -74,7 +74,7 @@ specs/001-backend-fail-closed-tests/
 ├── data-model.md        # Fase 1: reglas de decisión sobre las entidades existentes
 ├── quickstart.md        # Fase 1: guía de validación
 ├── contracts/
-│   ├── failure-routes.md        # Catálogo R01–R35 (SC-001)
+│   ├── failure-routes.md        # Catálogo R01–R36 (SC-001)
 │   └── conversation-channel.md  # Contratos de /api/verify, /api/verify-cedula y /api/identify
 ├── checklists/
 │   └── requirements.md
@@ -92,6 +92,8 @@ backend/
 │   ├── schemas.py           # Action pierde ring_bell; IdentifyRequest gana cedula_token
 │   ├── config.py            # caducidad del comprobante
 │   ├── invitations.py       # check_state() estricto (veto y fecha)
+│   ├── access.py            # resolve_by_name(): homónimos con una vetada
+│   ├── llm.py               # lectura tolerante y esquema restringido
 │   └── prompt.py            # el modelo ya no aprueba ni llama al residente
 ├── knowledge/
 │   ├── politicas.md         # sin aprobación conversacional ni intercomunicador
@@ -129,7 +131,7 @@ acotados en archivos existentes. También se actualizan `README.md`, `frontend/R
    red).
 3. **Historia 1 (P1)**: pruebas de rutas de fallo; las que fallen confirman defectos.
 4. **Historia 2 (P2)**: pruebas de estado real, del canal de conversación y de la verificación
-   de cédula (fallan por D1–D5 y D8).
+   de cédula (fallan por D1–D5, D8 y D9).
 5. **Correcciones**: guarda, retiro de `ring_bell`, `check_state()` estricto, comprobante de
    cédula, prompt y `knowledge/`; después el frontend.
 6. **Verificación y cierre**: quickstart completo; badges y deuda técnica en `docs/`.
