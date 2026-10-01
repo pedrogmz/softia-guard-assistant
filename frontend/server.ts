@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Backend local (FastAPI + Ollama + RAG + Whisper). Sin dependencias de nube.
 // Usamos 127.0.0.1 (no "localhost") a propósito: el fetch de Node resuelve
