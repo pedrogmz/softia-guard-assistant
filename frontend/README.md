@@ -3,9 +3,10 @@
 Interfaz del tótem de control de acceso: una **SPA en React + Vite** para pantalla táctil
 horizontal o vertical, con la dirección visual **«Videoportero Soft-IA»** (ver `../DESIGN.md`):
 **SoftiaGuard**, submarca de Soft-IA. El **Vigilante Virtual**, un personaje ilustrado con el trazo
-del logo de Soft-IA, atiende al visitante **por voz o por toque**. La voz
-—tanto la síntesis (respuesta hablada) como el reconocimiento (micrófono)— se maneja **en el
-navegador** con la Web Speech API. Toda la lógica de IA vive en el backend local.
+del logo de Soft-IA, atiende al visitante **por voz o por toque**. La respuesta hablada (TTS) se
+sintetiza **en el navegador** (`speechSynthesis`); el reconocimiento de voz (STT) ya no usa la Web
+Speech API: el navegador solo graba el clip del micrófono y lo transcribe **Whisper local** en el
+backend. Toda la lógica de IA vive en el backend local.
 
 > Parte del proyecto **SoftiaGuard Assistant**. Para levantar el stack completo (frontend +
 > backend + Ollama), consulta el [README principal](../README.md).
@@ -16,7 +17,7 @@ navegador** con la Web Speech API. Toda la lógica de IA vive en el backend loca
 - **Rubik** autoalojada (`@fontsource-variable/rubik`), sin fuentes remotas
 - **Tailwind CSS v4**, **lucide-react** (iconos), **motion** (animaciones)
 - **Express** (`server.ts`) — sirve la SPA y **proxya `/api` al backend** (en streaming, soporta audio)
-- **`speechSynthesis`** (Web Speech API) — voz de salida (TTS), en el navegador
+- **`speechSynthesis`** — voz de salida (TTS), en el navegador
 - **`MediaRecorder` + `getUserMedia`** — graba el audio del micrófono y lo envía a
   `/api/transcribe`; el reconocimiento (STT) ocurre en el backend con **Whisper local**
 
@@ -43,8 +44,7 @@ npm install
 npm run dev          # arranca en http://localhost:3000
 ```
 
-Abre **http://localhost:3000**. No se necesita ninguna API key (el backend anterior basado en
-Gemini fue reemplazado por IA local).
+Abre **http://localhost:3000**.
 
 ### Con Docker
 

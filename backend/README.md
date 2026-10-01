@@ -1,8 +1,7 @@
 # Backend local — Vigilante Virtual (LLM + RAG, 100% open-source)
 
-Backend de control de acceso para el tótem de **Residencias El Ávila**. Reemplaza la
-dependencia de Google Gemini por un **modelo de IA local (Ollama)** con **RAG (ChromaDB)**.
-No usa ningún servicio en la nube. La **voz de salida (TTS)** la maneja el navegador; la **voz
+Backend de control de acceso para el tótem. Reemplaza la
+dependencia de servicios en la nube por un **modelo de IA local (Ollama)** con **RAG (ChromaDB)**. La **voz de salida (TTS)** la maneja el navegador; la **voz
 de entrada (STT)** se transcribe aquí con **Whisper local**, así que el audio no sale a Internet.
 
 ## Endpoints
@@ -156,11 +155,6 @@ docker compose exec backend python -m app.sync
 # o vía HTTP
 curl -s -X POST http://localhost:8000/api/sync
 ```
-
-## Seguridad
-
-Los archivos `.env` originales contenían una `GEMINI_API_KEY` real. Al migrar a local ya no se
-usa: **elimínala del repositorio y rótala** en Google AI Studio. `.env` está en `.gitignore`.
 
 ## Estructura
 

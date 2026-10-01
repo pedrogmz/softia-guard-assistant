@@ -2,12 +2,12 @@
 
 Entrada del **desarrollo guiado por especificaciones (spec-driven)** de este proyecto. La
 especificación vive en [`docs/`](docs/) y es la **fuente de verdad**: describe el *qué* y el *por
-qué*. Los README describen el *cómo ejecutar*.
+qué*. Los README describen el *cómo ejecutar*. Los principios no negociables del proyecto están en
+la [constitución](.specify/memory/constitution.md), que prevalece sobre este archivo.
 
 ## Qué es el proyecto
 
-**SoftiaGuard Assistant** es un asistente de vigilancia virtual de control de acceso para el
-**Condominio Valle Blanco** (Valencia). Atiende al visitante en un tótem de entrada por **voz o
+**SoftiaGuard Assistant** es un asistente de vigilancia virtual de control de acceso para conjuntos residenciales. Atiende al visitante en un tótem de entrada por **voz o
 texto**, decide el acceso con **IA local** (LLM Ollama + RAG) y responde por voz, ejecutando o
 solicitando la acción del tótem (portón, intercomunicador, QR o denegación). Todo el
 procesamiento de IA es **local y open-source**, sin nube.
@@ -27,6 +27,8 @@ tiempos de respuesta, usabilidad).
 | [`docs/overview.md`](docs/overview.md) | Contexto, objetivos, alcance, actores, estado actual vs objetivo, glosario. |
 | [`docs/requirements.md`](docs/requirements.md) | Requerimientos funcionales, no funcionales, hardware, software, integración Soft-IA y criterios de validación. |
 | [`docs/architecture.md`](docs/architecture.md) | Arquitectura tecnológica, flujos, contratos de API, RAG, integración Soft-IA y UI/UX. |
+| [`.specify/memory/constitution.md`](.specify/memory/constitution.md) | Constitución: principios no negociables, restricciones, flujo de desarrollo y gobernanza. |
+| `specs/NNN-feature/` | Spec, plan y tareas de **cada feature** (los crea Spec Kit; aún no hay ninguna). |
 
 ## Mapa objetivos → documentos
 
@@ -39,13 +41,28 @@ tiempos de respuesta, usabilidad).
 
 ## Convención de desarrollo guiado por especificaciones
 
-- La spec en `docs/` es la **fuente de verdad**. Todo cambio de comportamiento se **refleja
-  primero en la spec** y luego en el código.
+Resumen operativo; las reglas completas están en la
+[constitución](.specify/memory/constitution.md).
+
+- La spec en `docs/` es la **fuente de verdad** del sistema completo. Todo cambio de
+  comportamiento se **refleja primero en la spec** y luego en el código.
 - Cada afirmación sobre funcionalidad lleva un **badge de estado**:
   - ✅ **Implementado** — existe y funciona en el prototipo.
   - 🟡 **Parcial / Simulado** — presente pero incompleto o simulado (p. ej. portón, QR).
   - ⏳ **Objetivo / Pendiente** — parte del objetivo, aún no construido (p. ej. Soft-IA).
 - No presentar como hecho lo que es *mock*/simulado.
+
+### Cuándo usar Spec Kit
+
+| Tipo de cambio | Cómo se hace |
+|---|---|
+| **Funcionalidad nueva o cambio de comportamiento** | `/speckit-specify` → `/speckit-plan` → `/speckit-tasks` → `/speckit-implement`. Los artefactos quedan en `specs/NNN-feature/`. |
+| **Corrección de documentación, bug menor, ajuste sin cambio de comportamiento** | Edición directa, sin Spec Kit. |
+| **Cambio de principios o reglas del proyecto** | `/speckit-constitution`. |
+
+`docs/` describe **cómo es el sistema hoy**; `specs/` guarda **cómo se decidió cada cambio**. Al
+cerrar una feature, su resultado se vuelca en `docs/` (nuevo `RF`/`RNF`, badge, contrato) en el
+mismo cambio.
 
 ## Estructura del repositorio
 
@@ -53,6 +70,8 @@ tiempos de respuesta, usabilidad).
 SoftiaGuardAssistant/
 ├── CLAUDE.md              # este índice (spec-driven)
 ├── docs/                  # especificación: overview · requirements · architecture
+├── .specify/              # Spec Kit: constitución (memory/), plantillas y scripts
+├── specs/                 # spec · plan · tareas por feature (se crea con la primera feature)
 ├── README.md             # cómo levantar el stack completo
 ├── frontend/             # UI del tótem (React + Vite + Three.js) — ver frontend/README.md
 ├── backend/              # API local (FastAPI + Ollama + RAG + Whisper) — ver backend/README.md

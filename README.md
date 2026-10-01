@@ -1,11 +1,11 @@
 # SoftiaGuard Assistant — Tótem de control de acceso con IA local
 
-Chatbot de control de acceso para el conjunto residencial **Residencias El Ávila**. El visitante
+Chatbot de control de acceso para el conjuntos residenciales. El visitante
 se acerca al tótem de la entrada, **habla o escribe** lo que desea (p. ej. *"Quiero visitar el
 2B"*) y el **Vigilante Virtual** le responde **por voz**, decidiendo si abre el portón, llama al
 residente, pide un código QR o niega el acceso.
 
-Todo el procesamiento de IA es **local y open-source**: no depende de ningún servicio en la nube.
+Todo el procesamiento de IA es **local y open-source**: no depende de ningún servicio en la nube para el procesamiento, sin embargo tiene una fuerte vinculado con el software de administración de condominios Soft-IA.
 
 ## Arquitectura
 
@@ -13,13 +13,13 @@ Todo el procesamiento de IA es **local y open-source**: no depende de ningún se
 Navegador (voz + UI 3D)                Docker                         Host
 ┌─────────────────────┐        ┌──────────────────────┐      ┌──────────────────────┐
 │  frontend (React)    │        │  frontend  :3000     │      │  Ollama (nativo)     │
-│  Web Speech API      │──/api─▶│   proxy /api ───────────────▶  backend :8000       │
-│  (TTS voz + STT mic) │        │  backend   :8000     │──────▶  LLM  qwen2.5:7b     │
-└─────────────────────┘        │   FastAPI + RAG      │ 11434│  Embed bge-m3        │
+│  TTS (navegador)     │──/api─▶│   proxy /api ───────────────▶  backend :8000       │
+│  mic → /api (Whisper)│        │  backend   :8000     │──────▶  LLM  qwen2.5:7b     │
+└─────────────────────┘        │   FastAPI+RAG+Whisper│ 11434│  Embed bge-m3        │
                                 └──────────────────────┘      └──────────────────────┘
 ```
 
-- **Voz de salida (TTS)**: la síntesis ocurre **en el navegador** (Web Speech API).
+- **Voz de salida (TTS)**: la síntesis ocurre **en el navegador** (`speechSynthesis`).
 - **Voz de entrada (STT)**: el navegador graba un clip y lo envía a `/api/transcribe`, donde
   **Whisper local** (faster-whisper) lo transcribe. El audio **no sale a ningún servicio externo**.
 - **LLM local**: [Ollama](https://ollama.com) con `qwen2.5:7b-instruct` (respuesta en JSON estructurado).
@@ -145,9 +145,3 @@ servicio `ollama` al final de `docker-compose.yml` y cambia `OLLAMA_HOST` a `htt
   `http://localhost:3000`, pero si accedes al tótem por IP o dominio necesitas **HTTPS**.
 - **La primera transcripción tarda**: Whisper descarga el modelo (`small`, ~0.5 GB) la primera
   vez y lo cachea en el volumen `whisper_cache`; las siguientes son rápidas.
-
-## Seguridad
-
-Los archivos `.env` originales del proyecto contenían una `GEMINI_API_KEY` real (del backend
-anterior basado en la nube). Ya **no se usa**: conviene **eliminarla del repositorio y rotarla**.
-Los `.env` están en `.gitignore`.

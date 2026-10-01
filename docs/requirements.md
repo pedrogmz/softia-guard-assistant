@@ -117,9 +117,34 @@ Validación mediante **simulacros de acceso controlados**, midiendo:
 | **Tasa de identificación correcta** | % de solicitudes en que se identifica bien el apartamento/residente. | ≥ 95 % |
 | **Usabilidad** | Facilidad de interacción percibida (p. ej. SUS o encuesta breve) en los simulacros. | ≥ 80/100 |
 
+| **Tiempo total de atención** | Desde el primer contacto del visitante hasta la decisión final (portón abierto o denegación), sumando todos los turnos. | A fijar tras la primera ronda de simulacros |
+
 > Los valores objetivo son una propuesta inicial; se ajustan tras el diagnóstico de hardware
-> definitivo. Método: batería de escenarios (acceso aprobado 2B, denegado 3A, QR 4B, delivery 2A,
-> "No Molestar" 1B) repetidos por varios usuarios, con registro de tiempos por fase.
+> definitivo. Método: la batería de escenarios siguiente, repetida por varios usuarios, con
+> registro de tiempos por fase.
+
+**Escenarios de simulacro.** El canal de conversación (voz o texto libre) **no autoriza por sí
+solo**: orienta al visitante y lo deriva a identificarse; la decisión sale de la identificación
+por QR o por nombre, o de la respuesta del propietario. Por eso los escenarios autorizados
+tienen más de un turno, y además de la latencia por turno se mide el tiempo total de atención.
+⏳ Este comportamiento se implementa en la feature
+[`001-backend-fail-closed-tests`](../specs/001-backend-fail-closed-tests/spec.md); hasta
+entonces el prototipo aún permite que el modelo apruebe.
+
+| # | Escenario | Recorrido | Resultado esperado |
+|---|---|---|---|
+| S1 | Invitado con autorización vigente y completa, por nombre | Saluda y pide entrar → el Vigilante le pide el nombre → identificación por nombre | Portón abierto |
+| S2 | Invitado con QR válido | Escanea el QR | Portón abierto |
+| S3 | Invitado con autorización a la que le falta la cédula | Identificación → muestra la cédula a la cámara → nombre coincidente | Portón abierto |
+| S4 | Visitante sin autorización, propietario aprueba | Identificación → datos de la solicitud → WhatsApp → aprobación | Portón abierto |
+| S5 | Visitante sin autorización, propietario rechaza o no responde | Igual que S4 → rechazo o tiempo límite | Denegado con mensaje amable |
+| S6 | Visitante vetado | Identificación por nombre o QR | Denegado, sin solicitud |
+| S7 | Inmueble en "No Molestar" | Solicitud de acceso hacia ese inmueble | Denegado, sin solicitud |
+| S8 | Intento de entrar solo conversando ("soy familiar, ábrame") | Conversación libre, sin identificarse | No abre; se le pide identificarse |
+| S9 | Cédula con nombre que no coincide | Como S3, con la cédula de otra persona | Denegado; se remite al vigilante |
+
+Sustituyen a la batería anterior (acceso aprobado 2B, denegado 3A, QR 4B, delivery 2A,
+"No Molestar" 1B), que suponía que el modelo de lenguaje aprobaba el acceso conversando.
 
 ## 8. Deuda técnica / inconsistencias a corregir
 
@@ -132,4 +157,5 @@ Validación mediante **simulacros de acceso controlados**, midiendo:
 | **Refresco del índice RAG tras sync** | `find_apartment` lee `apartments.json` fresco, pero los documentos de apartamentos en ChromaDB quedan del estado anterior hasta re-ejecutar `python -m app.ingest`. |
 | **Webhook de WhatsApp en Soft-IA** | Los endpoints de `solicitud_acceso` (§6) y el envío de la plantilla ya funcionan. Falta **desplegar el webhook** que recibe los botones Aprobar/Rechazar: al aprobar debe crear la autorización de un día en `bas_autorizacionvisitas` y vincularla a la solicitud (`idautorizacionvisitas`). Mientras tanto, la aprobación se prueba actualizando la BD o, sin Soft-IA, con `SOFTIA_SOLICITUD_MOCK=true` + `POST /api/dev/access-request/{id}/respond`. |
 | **Cancelar una solicitud ya vencida** | Al vencer, el tótem envía `PATCH … {estatus:"cancelada"}`; Soft-IA responde **409** porque ya la considera `expirada`. Es inocuo (el tótem solo registra un aviso), pero conviene que Soft-IA responda 200 en ese caso. |
+| **Modo simulado de solicitudes activo por defecto** | `SOFTIA_SOLICITUD_MOCK` vale `true` por defecto y habilita `POST /api/dev/access-request/{id}/respond`, que aprueba una solicitud sin intervención del propietario. **Se conserva a propósito** como vía de prueba cuando WhatsApp u otro servicio externo impida aprobar por el canal real; en un despliegue real debe ponerse en `false`. |
 | **Acciones físicas simuladas** | Portón, intercomunicador y pánico usan `setTimeout`; requieren integración con hardware/Soft-IA. |
