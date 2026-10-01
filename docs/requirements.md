@@ -57,7 +57,7 @@ este diagnóstico se derivan los requerimientos siguientes.
 | RNF-07 | **Seguridad**: `.env` fuera del control de versiones; rotar la `GEMINI_API_KEY` heredada; autenticación/roles a futuro. | 🟡 |
 | RNF-08 | **Portabilidad / despliegue**: contenedores Docker; Ollama nativo en el host para aprovechar GPU/Metal. | ✅ |
 | RNF-09 | **Observabilidad**: logs de las etapas (verify/transcribe) para diagnóstico. | 🟡 (logging básico) |
-| RNF-10 | **Configurable / multi-condominio**: la identidad del condominio (nombre, ubicación, residentes y políticas) es parametrizable para reutilizar el sistema en distintos condominios sin tocar código. "Valle Blanco / Valencia" es solo un placeholder. | 🟡 (frontend vía `VITE_BUILDING_NAME`; backend hardcodeado) |
+| RNF-10 | **Configurable / multi-condominio**: la identidad del condominio (nombre, ubicación, residentes y políticas) es parametrizable para reutilizar el sistema en distintos condominios sin tocar código. "Valle Blanco / Valencia" es solo un placeholder. | 🟡 (frontend vía `VITE_BUILDING_NAME`; backend sin nombre de condominio, pero con residentes y políticas de ejemplo fijos) |
 
 ## 4. Requerimientos de hardware
 
@@ -150,7 +150,7 @@ Sustituyen a la batería anterior (acceso aprobado 2B, denegado 3A, QR 4B, deliv
 
 | Ítem | Detalle |
 |---|---|
-| **Identidad del condominio como contenido placeholder** (RNF-10) | La identidad (nombre, ubicación, residentes, políticas) vive como **contenido de ejemplo** en el backend: el prompt (`prompt.py`), `knowledge/*.md` y `apartments.json` usan "Residencias El Ávila / Guatire"; el frontend usa `VITE_BUILDING_NAME` y "Guatire, VZLA" en el header. **Todo lo fijo se sustituye por el condominio real al momento de la implementación** (no es un defecto). Mejora propuesta para multi-condominio: hacerla **dirigida por configuración** en vez de editar código fuente. Nota menor: hoy los placeholders de frontend ("Valle Blanco") y backend ("El Ávila") difieren entre sí. |
+| **Identidad del condominio como contenido placeholder** (RNF-10) | La identidad (nombre, ubicación, residentes, políticas) vive como **contenido de ejemplo** en el backend: el prompt (`prompt.py`) y `knowledge/*.md` son genéricos ("el conjunto residencial", sin nombre ni ubicación), y los residentes y políticas de `knowledge/*.md` y `apartments.json` son de ejemplo; el frontend usa `VITE_BUILDING_NAME`. **Todo lo fijo se sustituye por el condominio real al momento de la implementación** (no es un defecto). Mejora propuesta para multi-condominio: hacerla **dirigida por configuración** en vez de editar código fuente. |
 | **`VITE_APP_NAME` sin uso** | Definida en `.env` pero no consumida en `App.tsx`. |
 | **Restos del backend Gemini** | Referencias obsoletas en `frontend/metadata.json` y comentarios; rotar/eliminar `GEMINI_API_KEY` heredada. |
 | **Registro de accesos no-QR** | Se registran las visitas autorizadas por QR (con `idvisita`). Los accesos peatonales por LLM no tienen `idvisita`, así que aún no se auditan en Soft-IA (requeriría otro endpoint/estructura). |

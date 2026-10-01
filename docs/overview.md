@@ -5,8 +5,8 @@
 
 ## Contexto y problema
 
-El **Condominio Valle Blanco** (Valencia, Venezuela) gestiona su operación con el software
-**Soft-IA**. El control de acceso vehicular y peatonal en la entrada depende hoy de un vigilante
+Los conjuntos residenciales que gestionan su operación con el software
+**Soft-IA** acotan que el control de acceso vehicular y peatonal en la entrada de sus conjuntos depende hoy de un vigilante
 humano que verifica manualmente a los visitantes, contacta a los residentes y opera el portón.
 Este proceso es lento, propenso a errores, difícil de auditar y depende de la disponibilidad y el
 criterio del personal.
@@ -17,16 +17,10 @@ datos del condominio, responde con voz, y ejecuta o solicita la acción correspo
 portón, consultar al propietario por WhatsApp, pedir un código QR o negar el acceso). Todo el procesamiento de IA
 es **local y open-source**, sin dependencia de servicios en la nube.
 
-> **Nota multi-condominio:** "Condominio Valle Blanco (Valencia)" es el **caso piloto /
-> placeholder** del proyecto universitario, no un destino fijo. La solución se concibe como
-> **reutilizable por distintos condominios**: la identidad (nombre, ubicación, residentes y
-> políticas) es configurable y cambia en cada despliegue (ver
-> [requirements.md](requirements.md#3-requerimientos-no-funcionales-rnf), RNF-10).
-
 ## Objetivo general
 
 > Diseñar un asistente de vigilancia virtual de control de acceso vehicular y peatonal conectado
-> con el software Soft-IA usado en el condominio Valle Blanco ubicado en Valencia.
+> con el software Soft-IA usado por los conjuntos residenciales que usan el software.
 
 ## Objetivos específicos
 
@@ -100,8 +94,8 @@ Pendiente para cumplir el objetivo completo:
   frontend; falta integración con hardware real.
 - ⏳ **Validación** formal de latencia/tiempos de respuesta/usabilidad mediante simulacros.
 - 🟡 **Identidad del condominio como placeholder**: nombre, residentes y políticas son contenido
-  de ejemplo ("El Ávila" en el backend, "Valle Blanco" en el frontend) que se **sustituye por el
-  condominio real en cada implementación**; la mejora propuesta es hacerla dirigida por
+  de ejemplo que se **sustituye por el condominio real en cada implementación** (el prompt y
+  las políticas del backend ya no nombran ningún condominio); la mejora propuesta es hacerla dirigida por
   configuración (RNF-10, ver [requirements.md](requirements.md#3-requerimientos-no-funcionales-rnf)).
 
 ## Glosario

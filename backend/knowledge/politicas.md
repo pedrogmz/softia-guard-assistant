@@ -1,4 +1,4 @@
-# Políticas de acceso — Residencias El Ávila (Guatire, Venezuela)
+# Políticas de acceso del conjunto residencial
 
 Este documento define las reglas que el Vigilante Virtual debe aplicar al atender a los
 visitantes en el tótem de seguridad de la entrada.

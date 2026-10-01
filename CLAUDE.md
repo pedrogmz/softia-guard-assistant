@@ -91,6 +91,7 @@ Para build/run: [README raíz](README.md), [frontend/README.md](frontend/README.
   cambiando esa configuración.
 
 > Hoy la identidad está **parcialmente hardcodeada**: el frontend usa `VITE_BUILDING_NAME`, pero el
-> backend fija "Residencias El Ávila / Guatire" en el prompt, el `knowledge/` y los datos. Hacerla
+> backend es genérico en el prompt ("el conjunto residencial") y fija residentes y políticas de
+> ejemplo en el `knowledge/` y los datos. Hacerla
 > configurable end-to-end está registrado como deuda técnica en
 > [requirements.md](docs/requirements.md#8-deuda-técnica--inconsistencias-a-corregir).
